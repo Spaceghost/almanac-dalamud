@@ -24,6 +24,8 @@ SESSION_RULES = """You are running unattended for almanac autopilot, in a git wo
 on branch {branch}. Rules:
 - Work only inside this directory. Do not push, do not open pull requests, do not use sudo,
   do not deploy, do not ssh anywhere{ssh_note}.
+- Do not run `git stash` (the stash stack is shared with the repository's other worktrees)
+  and do not switch branches: stay on {branch}.
 - Make the smallest change that completes the task. Commit your work with clear messages.
 - Run the tests with: {test}  (they must pass before you finish).
 - Never print, log or commit secrets or tokens.
@@ -166,26 +168,57 @@ def limit_backoff_seconds(kind: str, now: float, next_midnight: float) -> float:
 
 
 # -- local coders ------------------------------------------------------------
+# Codex features that add tools a local coding session never needs. A small
+# model picks a wrong tool more often the longer the tool list is, and every
+# tool definition is prompt tokens out of a 32k context.
+CODEX_DISABLE_FEATURES = (
+    "goals", "multi_agent", "multi_agent_v2", "view_image", "sleep_tool", "apps",
+    "skill_search", "tool_suggest", "browser_use", "computer_use", "image_generation",
+    "memories", "personality", "hooks", "plugins",
+)
+
+# Codex CLI against an OpenAI-compatible local endpoint (almanac gateway or
+# Ollama). Each option below exists because of an observed failure; see
+# ``docs/autopilot.md`` -> "Codex against a local model".
+CODEX_LOCAL: list[str] = [
+    "codex", "exec", "--json", "--sandbox", "workspace-write", "-C", "{worktree}",
+    "-c", 'model_provider="autopilot_local"',
+    "-c", 'model_providers.autopilot_local.name="autopilot local"',
+    "-c", 'model_providers.autopilot_local.base_url="{base_url}"',
+    "-c", 'model_providers.autopilot_local.env_key="AUTOPILOT_LOCAL_KEY"',
+    "-c", 'model_providers.autopilot_local.wire_api="responses"',
+    # Ollama serves no web search (OLLAMA_NO_CLOUD=1). If codex offers its
+    # built-in web_search tool the model eventually calls it, Ollama answers
+    # "ollama cloud is disabled: web search is unavailable" and the stream dies.
+    "-c", 'web_search="disabled"',
+    # Codex has no catalogue entry for a local model, so it assumes a very large
+    # context and never compacts; these two tell it what the backend serves.
+    "-c", "model_context_window={context}",
+    "-c", "model_auto_compact_token_limit={compact}",
+    # Unattended: never ask the owner, stay inside the worktree.
+    "-c", 'approval_policy="never"',
+    *[arg for feature in CODEX_DISABLE_FEATURES for arg in ("--disable", feature)],
+    "-m", "{model}", "{prompt}",
+]
+
 LOCAL_PRESETS: dict[str, list[str]] = {
-    # aider: one instruction, auto-commit; runs the tests itself when a command is known
+    "codex": CODEX_LOCAL,
+    # aider: one instruction, auto-commit; runs the tests itself when a command is
+    # known. Needs its own Python (aider-chat requires < 3.13), so it is a
+    # fallback, not the default.
     "aider": ["aider", "--model", "openai/{model}", "--yes-always", "--no-check-update", "--no-show-model-warnings",
               "--no-pretty", "--no-stream", "--auto-commits", "--no-gitignore", "--message", "{prompt}"],
-    # Codex CLI pointed at an OpenAI-compatible local endpoint (almanac gateway or Ollama)
-    "codex": ["codex", "exec", "--json", "--sandbox", "workspace-write", "-C", "{worktree}",
-              "-c", 'model_provider="autopilot_local"',
-              "-c", 'model_providers.autopilot_local.name="autopilot local"',
-              "-c", 'model_providers.autopilot_local.base_url="{base_url}"',
-              "-c", 'model_providers.autopilot_local.env_key="AUTOPILOT_LOCAL_KEY"',
-              "-c", 'model_providers.autopilot_local.wire_api="responses"',
-              "-m", "{model}", "{prompt}"],
 }
 
 
-def local_coder_argv(settings: dict[str, Any], repo: Repo, worktree: Path, base_url: str, model: str, prompt: str) -> list[str]:
-    tool = str(settings.get("tool", "aider"))
+def local_coder_argv(
+    settings: dict[str, Any], repo: Repo, worktree: Path, base_url: str, model: str, prompt: str, context: int = 32768
+) -> list[str]:
+    tool = str(settings.get("tool", "codex"))
     custom = settings.get("argv")
-    template = [str(a) for a in (custom or LOCAL_PRESETS.get(tool, LOCAL_PRESETS["aider"]))]
-    values = {"model": model, "base_url": base_url, "worktree": str(worktree), "prompt": prompt, "test": " ".join(repo.test)}
+    template = [str(a) for a in (custom or LOCAL_PRESETS.get(tool, LOCAL_PRESETS["codex"]))]
+    values = {"model": model, "base_url": base_url, "worktree": str(worktree), "prompt": prompt,
+              "test": " ".join(repo.test), "context": str(context), "compact": str(compact_limit(context))}
     argv = list(template)
     for key, value in values.items():
         argv = [part.replace("{" + key + "}", value) for part in argv]
@@ -194,9 +227,19 @@ def local_coder_argv(settings: dict[str, Any], repo: Repo, worktree: Path, base_
     return argv + [str(a) for a in settings.get("extra_args", [])]
 
 
-def local_coder_env(base_url: str, token: str) -> dict[str, str]:
+def compact_limit(context: int) -> int:
+    """Compact well before the served context runs out (codex counts only its own estimate)."""
+    return max(4096, int(context * 2 / 3))
+
+
+def local_coder_env(base_url: str, token: str, codex_home: str = "") -> dict[str, str]:
     key = token or "local"
-    return {"OPENAI_API_BASE": base_url, "OPENAI_BASE_URL": base_url, "OPENAI_API_KEY": key, "AUTOPILOT_LOCAL_KEY": key}
+    env = {"OPENAI_API_BASE": base_url, "OPENAI_BASE_URL": base_url, "OPENAI_API_KEY": key, "AUTOPILOT_LOCAL_KEY": key}
+    if codex_home:
+        # Codex must not read the owner's ~/.codex: its model, hooks, plugins and
+        # MCP servers are for interactive use and would change what runs here.
+        env["CODEX_HOME"] = codex_home
+    return env
 
 
 def parse_local(tool: str, result: ProcResult) -> CodeResult:
