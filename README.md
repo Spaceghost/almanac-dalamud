@@ -348,7 +348,7 @@ It is off until you start it, and `dry_run = true` is the default.
                                |  cap / rate limit / quota /   author's GPU     gh pr create --draft,
                                |  auth error detected          PR comment,      gh pr checks,
                                v                               fix round        XivMcp request_action -> ticket
-                              local coder (aider or Codex on
+                              local coder (Codex or aider on
                               a local model) on a coder backend
                               lease; tasks split smaller
       all coding and tests run in <state>/autopilot/worktrees/<repo>-<task> (bubblewrap when installed)
@@ -369,8 +369,8 @@ It is off until you start it, and `dry_run = true` is the default.
    `max_wall_minutes`). When a session fails with a usage limit, rate limit,
    quota/billing or authentication error (detected from the CLI's output),
    cloud coding is switched off (30 minutes for a rate limit, until the next
-   day otherwise) and the same step continues on a **local coder** (aider, or
-   Codex CLI pointed at the local model) in the same worktree. Local coders
+   day otherwise) and the same step continues on a **local coder** (Codex CLI
+   pointed at the local model, or aider) in the same worktree. Local coders
    get smaller jobs: a code step is split into up to `local_split_parts`
    parts, each followed by the tests. Cloud is used again once the block
    expires or the day rolls over.
@@ -405,6 +405,42 @@ another machine, `enabled = false`. Backends are health-checked (`/healthz`,
 Long jobs take a lease, so a coder on one GPU and a reviewer on another run
 at the same time as a cloud session. `almanac autopilot pool` shows health
 and load. With no pool configured, the `[gateway]` backend is used.
+
+`coder_model` gives a backend a different model for coding sessions, and
+`context` (default 32768) says what context it actually serves — the local
+coder is told, so it compacts instead of silently overflowing.
+
+### Local coding sessions
+
+`[autopilot.local_coder] tool` is `codex` (the default), `aider`, or a
+`custom` argv with `{prompt} {model} {base_url} {worktree} {test} {context}
+{compact}` placeholders. The session runs in the task's worktree, against the
+leased backend's OpenAI-compatible endpoint, and commits nothing autopilot
+cannot see: whatever it leaves uncommitted is committed after the session, and
+the repo's tests decide whether the step passed.
+
+The `codex` preset is Codex CLI pointed at the local endpoint, and every option
+in it exists because of an observed failure against Ollama:
+
+- `web_search="disabled"` — Ollama serves no web search, so the built-in
+  `web_search` tool ends the session: the model calls it, Ollama answers
+  `ollama cloud is disabled: web search is unavailable` and the stream drops.
+- `model_context_window` / `model_auto_compact_token_limit` — codex has no
+  catalogue entry for a local model (it says so and uses fallback metadata),
+  assumes a large context and never compacts.
+- `--disable` for goals, sub-agents, images, apps, skills, hooks and plugins —
+  a small model picks the wrong tool more often the longer the tool list is,
+  and each definition costs context. What is left is
+  `exec_command`/`write_stdin`: the model edits files by writing them from the
+  shell. It will sometimes try `apply_patch`, which codex does not register for
+  a model without catalogue metadata; the call fails and the model writes the
+  file instead.
+- `CODEX_HOME` is autopilot's own directory (`<state>/autopilot/codex`, or
+  `codex_home`), never the owner's `~/.codex`, whose model, hooks, plugins and
+  MCP servers are for interactive use.
+
+`aider` is a fallback: `aider-chat` requires Python < 3.13, so it needs its own
+interpreter (a container or a managed Python) on a host that ships a newer one.
 
 ### FFXIV
 
