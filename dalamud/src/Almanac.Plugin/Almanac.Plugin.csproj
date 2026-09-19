@@ -1,0 +1,14 @@
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <!--
+    Reference assemblies come from the Dalamud dev hooks (Linux: ~/.xlcore/dalamud/Hooks/dev/, Windows:
+    %APPDATA%\XIVLauncher\addon\Hooks\dev\, or DALAMUD_HOME).
+  -->
+  <PropertyGroup>
+    <AssemblyName>Almanac</AssemblyName>
+    <RootNamespace>Almanac.Plugin</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Almanac.Core\Almanac.Core.csproj" />
+  </ItemGroup>
+</Project>
