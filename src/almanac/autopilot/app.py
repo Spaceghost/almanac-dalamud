@@ -10,7 +10,7 @@ from typing import Any
 from ..config import Config
 from ..service import Almanac
 from ..upstream import Upstream
-from .approvals import APPROVED, DENIED, Approval, Approvals
+from .approvals import APPROVED, DENIED, Approval, Approvals, is_local
 from .game import Game, NoGame, XivMcpGame
 from .planner import Planner
 from .pool import BackendModel, Pool, PoolModel
@@ -127,9 +127,10 @@ def pending_text(settings: Settings, store: Store) -> str:
     for approval in items:
         age = int(time.time() - approval.created)
         lines.append(f"{approval.ticket:8} {approval.kind:11} #{approval.task_id:<4} waiting {age // 60}m  {approval.title[:70]}")
+    cli = os.environ.get("ALMANAC_AUTOPILOT_CLI", "almanac autopilot")  # a wrapper can name itself
     lines.append("")
-    lines.append("approve: almanac autopilot approve <ticket|all>   deny: almanac autopilot deny <ticket|all>")
-    lines.append("details: almanac autopilot show <ticket>          5-minute session: almanac autopilot allow")
+    lines.append(f"approve: {cli} approve <ticket|all>   deny: {cli} deny <ticket|all>")
+    lines.append(f"details: {cli} show <ticket>          5-minute session: {cli} allow")
     return "\n".join(lines)
 
 
@@ -164,8 +165,10 @@ def status(settings: Settings, store: Store) -> dict[str, Any]:
         "tasks": counts,
         "today": {**budget.spent(), "caps": {k: settings.caps[k] for k in ("coding_runs_per_day", "tokens_per_day", "cost_usd_per_day")}},
         "coding": budget.may_code().reason,
+        # game tickets only: code and push gates are listed as pending_approvals
         "waiting_on_approval": [
-            {"task": s.task_id, "tool": s.args.get("tool", ""), "ticket": s.ticket_id} for s in store.waiting_steps()
+            {"task": s.task_id, "tool": s.args.get("tool", ""), "ticket": s.ticket_id}
+            for s in store.waiting_steps() if not is_local(s.ticket_id)
         ],
         "pending_approvals": [
             {"ticket": a.ticket, "kind": a.kind, "task": a.task_id, "title": a.title, "asked": a.created} for a in approvals.pending()
