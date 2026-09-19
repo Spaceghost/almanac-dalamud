@@ -141,7 +141,7 @@ public sealed class XivMcpLink(IDalamudPluginInterface pi, IFramework framework,
         return null;
     }
 
-    private T? Call<T>(Func<T> f)
+    private static T? Call<T>(Func<T> f)
     {
         try
         {
@@ -154,7 +154,7 @@ public sealed class XivMcpLink(IDalamudPluginInterface pi, IFramework framework,
         }
     }
 
-    private int? Call(Func<int> f)
+    private static int? Call(Func<int> f)
     {
         try
         {

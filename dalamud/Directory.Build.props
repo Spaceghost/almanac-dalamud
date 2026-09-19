@@ -13,4 +13,24 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <Version>0.1.0</Version>
   </PropertyGroup>
+
+  <!--
+    Quality gate. The rules that matter here are the reload-leak ones: a Dalamud plugin that
+    forgets to dispose a field or unsubscribe an event leaks the whole game on every /xlplugins
+    reload, so CA2213, CA1001, CA1816, CA1063, CA2000, CA2012, CA2008 and CS4014 are build errors
+    rather than warnings. Everything else is a warning first; see .editorconfig for the demotions
+    and why each one is there.
+  -->
+  <PropertyGroup>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <AnalysisMode>Recommended</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- NU1903 and friends: a vulnerable package fails the build, not just the audit job. -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+    <WarningsNotAsErrors></WarningsNotAsErrors>
+  </PropertyGroup>
 </Project>

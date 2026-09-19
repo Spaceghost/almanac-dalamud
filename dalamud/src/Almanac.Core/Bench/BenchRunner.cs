@@ -51,24 +51,34 @@ public sealed class BenchRunner(IChatBackend chat, Suite suite)
 
         await WarmUpAsync(model, ct).ConfigureAwait(false);
 
-        await using var sampler = Vram == null ? null : new VramSampler(Vram, TimeSpan.FromSeconds(1));
-        sampler?.Start();
-        var wall = Stopwatch.StartNew();
-        var runs = new List<TaskRun>();
-        var mode2 = ToolCalling;
-        foreach (var task in tasks)
+        var sampler = Vram == null ? null : new VramSampler(Vram, TimeSpan.FromSeconds(1));
+        try
         {
-            progress?.Report(new BenchProgress(runs.Count, tasks.Count, task.Id, null));
-            var run = await RunTaskAsync(task, model, mode, mode2, ct).ConfigureAwait(false);
-            if (run.Agent?.ModeUsed == ToolCallingMode.Prompted)
-                mode2 = ToolCallingMode.Prompted; // the backend rejected native tools once; don't retry every task
-            runs.Add(run);
-            progress?.Report(new BenchProgress(runs.Count, tasks.Count, null, run));
-        }
+            sampler?.Start();
+            var wall = Stopwatch.StartNew();
+            var runs = new List<TaskRun>();
+            var mode2 = ToolCalling;
+            foreach (var task in tasks)
+            {
+                progress?.Report(new BenchProgress(runs.Count, tasks.Count, task.Id, null));
+                var run = await RunTaskAsync(task, model, mode, mode2, ct).ConfigureAwait(false);
+                if (run.Agent?.ModeUsed == ToolCallingMode.Prompted)
+                    mode2 = ToolCallingMode.Prompted; // the backend rejected native tools once; don't retry every task
+                runs.Add(run);
+                progress?.Report(new BenchProgress(runs.Count, tasks.Count, null, run));
+            }
 
-        wall.Stop();
-        int? peak = sampler == null ? null : await sampler.StopAsync().ConfigureAwait(false);
-        return Summarize(suite, model, mode, runs, peak, wall.Elapsed.TotalSeconds, mode2);
+            wall.Stop();
+            int? peak = sampler == null ? null : await sampler.StopAsync().ConfigureAwait(false);
+            return Summarize(suite, model, mode, runs, peak, wall.Elapsed.TotalSeconds, mode2);
+        }
+        finally
+        {
+            // The sampler owns a CancellationTokenSource and a polling task; a cancelled or failed
+            // run must still let go of both.
+            if (sampler != null)
+                await sampler.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     internal static BenchRun Summarize(Suite suite, string model, BenchMode mode, IReadOnlyList<TaskRun> runs, int? peak, double totalSeconds, ToolCallingMode modeUsed)
