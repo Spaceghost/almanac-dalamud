@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .autopilot import mcp_tools as autopilot_tools
 from .config import Config
 from .kb import KnowledgeBase, KnowledgeError, ollama_embedder
 from .residency import STATE_FILE, read_state
@@ -141,7 +142,7 @@ class Almanac:
         order = ["read", "change", "destructive"]
         limit = order.index(max_safety)
         out = []
-        for name, spec in KB_TOOLS.items():
+        for name, spec in {**KB_TOOLS, **autopilot_tools.TOOLS}.items():
             if order.index(spec["safety"]) <= limit:
                 out.append({"name": name, "description": spec["description"], "safety": spec["safety"], "input_schema": spec["schema"]})
         for tool in self.tools.values():
@@ -164,6 +165,8 @@ class Almanac:
     def safety_of(self, name: str) -> str:
         if name in KB_TOOLS:
             return str(KB_TOOLS[name]["safety"])
+        if name in autopilot_tools.TOOLS:
+            return str(autopilot_tools.TOOLS[name]["safety"])
         if name in self.tools:
             return self.tools[name].safety
         raise ToolError(f"unknown tool {name}")
@@ -185,6 +188,8 @@ class Almanac:
         if name == "kb_note":
             preview = self._kb_note(args, write=False)
             return f"Write knowledge note {preview['path']} ({preview['action']}):\n\n{preview['diff'] or '(no change)'}"
+        if name in autopilot_tools.TOOLS:
+            return autopilot_tools.plan(name, args, self.config)
         tool = self.tools[name]
         clean = tool.validate(args)
         target = tool.target_host(clean)
@@ -216,8 +221,8 @@ class Almanac:
                     )
                 self.audit("approved", name, args, caller, safety=safety, via="interactive" if approved else "token")
             return self._run(name, args, caller)
-        except (ToolError, KnowledgeError) as exc:
-            if name not in ("kb_search", "kb_read", "kb_list", "model_residency"):
+        except (ToolError, KnowledgeError, autopilot_tools.AutopilotToolError) as exc:
+            if name not in ("kb_search", "kb_read", "kb_list", "model_residency", "autopilot_status"):
                 self.audit("rejected", name, args, caller, error=str(exc))
             return Outcome(text=f"error: {exc}", is_error=True)
 
@@ -247,6 +252,11 @@ class Almanac:
             result = self._kb_note(args, write=True)
             self.audit("ran", name, {"path": result["path"]}, caller, written=result["written"])
             return Outcome(f"{'written' if result['written'] else 'unchanged'}: {result['path']}\n\n{result['diff']}")
+        if name in autopilot_tools.TOOLS:
+            text = autopilot_tools.run(name, args, self.config)
+            if name != "autopilot_status":
+                self.audit("ran", name, args, caller)
+            return Outcome(text)
         tool = self.tools[name]
         clean = tool.validate(args)
         result = execute(tool, clean, self.config.hosts, self.config.this_host)
