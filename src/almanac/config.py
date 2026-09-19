@@ -24,6 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULTS: dict[str, Any] = {
     "knowledge_dirs": [str(REPO_ROOT / "examples" / "knowledge")],
     "tools_dirs": [str(REPO_ROOT / "examples" / "tools")],
+    "disabled_tools": [],
     "state_dir": "~/.local/state/almanac",
     "token_file": "~/.config/almanac/token",
     "this_host": "",
@@ -53,7 +54,7 @@ DEFAULTS: dict[str, Any] = {
         "poll_seconds": 15,
     },
     "kb": {"embed_model": ""},
-    "agent": {"max_steps": 8, "model": "", "temperature": 0.2},
+    "agent": {"max_steps": 8, "model": "", "temperature": 0.2, "reasoning_effort": "none"},
 }
 
 

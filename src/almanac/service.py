@@ -121,6 +121,8 @@ class Almanac:
         for directory in config.tools_dirs:
             if directory.is_dir():
                 self.tools.update(load_tools(directory, known))
+        for name in config.raw.get("disabled_tools", []):
+            self.tools.pop(name, None)
         self.audit_path = config.state_dir / "audit.jsonl"
         self._key = secrets.token_bytes(32)
 
@@ -219,13 +221,17 @@ class Almanac:
     def _run(self, name: str, args: dict[str, Any], caller: str) -> Outcome:
         if name == "kb_search":
             hits = self.kb.search(args["query"], args.get("host"), args.get("tag"), args.get("kind"), int(args.get("limit", 8)))
-            return Outcome(json.dumps(hits, indent=1) if hits else "no matching notes")
+            lines = [
+                f"{h['path']} | {h['title']} | {h['kind']} | hosts: {', '.join(h['hosts'])} | safety: {h['safety']}\n    {' '.join(h['snippet'].split())}"
+                for h in hits
+            ]
+            return Outcome("\n".join(lines) + "\n(kb_read a path for the full note)" if hits else "no matching notes")
         if name == "kb_read":
             note = self.kb.load(args["path"])
             text = self.kb.resolve(note.path).read_text()
             return Outcome(f"path: {note.path}\nsha256: {note.sha256}\n\n{text}")
         if name == "kb_list":
-            return Outcome(json.dumps(self.kb.list(args.get("kind")), indent=1))
+            return Outcome("\n".join(f"{n['path']} | {n['title']} | hosts: {', '.join(n['hosts'])}" for n in self.kb.list(args.get("kind"))))
         if name == "kb_note":
             result = self._kb_note(args, write=True)
             self.audit("ran", name, {"path": result["path"]}, caller, written=result["written"])
