@@ -297,26 +297,26 @@ def test_pool_roles_process_rule_failover_and_leases(tmp_path: Path) -> None:
     running: set[str] = set()
     events: list[str] = []
     backends = [
-        Backend("p4000", "http://p4000", "almanac", "qwen", roles=["planner", "coder", "reviewer"], priority=10),
-        Backend("4060", "http://4060", "almanac", "qwen", roles=["planner", "reviewer"], priority=5),
-        Backend("3070", "http://3070", "ollama", "qwen", roles=["coder", "reviewer"], unavailable_while_process=["ffxiv_dx11.exe"]),
+        Backend("box-a", "http://box-a", "almanac", "qwen", roles=["planner", "coder", "reviewer"], priority=10),
+        Backend("box-b", "http://box-b", "almanac", "qwen", roles=["planner", "reviewer"], priority=5),
+        Backend("box-c", "http://box-c", "ollama", "qwen", roles=["coder", "reviewer"], unavailable_while_process=["ffxiv_dx11.exe"]),
     ]
     unloads: list[str] = []
     pool = Pool(backends, get=lambda url, **k: Resp(200), post=lambda url, **k: unloads.append(url), match=lambda wanted: [w for w in wanted if w in running],
                 clock=clock, on_event=events.append)
     lease = pool.acquire("coder")
-    assert lease.backend.name == "p4000"
-    assert pool.acquire("coder").backend.name == "3070"
+    assert lease.backend.name == "box-a"
+    assert pool.acquire("coder").backend.name == "box-c"
     assert pool.acquire("coder") is None  # both coder slots busy
     pool.release(lease)
-    reviewer = pool.acquire("reviewer", avoid={"p4000"})
-    assert reviewer.backend.name == "4060"
+    reviewer = pool.acquire("reviewer", avoid={"box-a"})
+    assert reviewer.backend.name == "box-b"
     running.add("ffxiv_dx11.exe")
     clock.advance(60)
-    assert "3070" not in [b.name for b in pool.healthy("coder")]
+    assert "box-c" not in [b.name for b in pool.healthy("coder")]
     assert pool.abort_reason(type(lease)(backends[2], "coder"))().startswith("off-limits while ffxiv_dx11.exe")
-    assert any("3070: down" in e for e in events)
-    assert unloads and all(u == "http://3070/api/generate" for u in unloads)  # the game gets its GPU back
+    assert any("box-c: down" in e for e in events)
+    assert unloads and all(u == "http://box-c/api/generate" for u in unloads)  # the game gets its GPU back
 
     class Flaky:
         def __init__(self, b):
@@ -325,12 +325,12 @@ def test_pool_roles_process_rule_failover_and_leases(tmp_path: Path) -> None:
         def complete(self, system, user, json_mode=False):
             from almanac.autopilot.planner import ModelUnavailable
 
-            if self.b.name == "p4000":
-                raise ModelUnavailable("p4000 timed out")
+            if self.b.name == "box-a":
+                raise ModelUnavailable("box-a timed out")
             return f"answer from {self.b.name}"
 
     model = PoolModel(pool, "planner", factory=Flaky)
-    assert model.complete("s", "u") == "answer from 4060"
+    assert model.complete("s", "u") == "answer from box-b"
 
 
 def test_subprocess_runner_kill_switch_and_timeout(tmp_path: Path) -> None:
