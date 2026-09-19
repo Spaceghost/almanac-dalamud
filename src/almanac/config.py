@@ -53,6 +53,17 @@ DEFAULTS: dict[str, Any] = {
         "gpu_uuid": "",
         "poll_seconds": 15,
     },
+    "residency": {
+        # Keep the model loaded and pinned while any of these processes runs
+        # (basename of argv[0], case-insensitive; Wine's C:\...\x.exe paths match).
+        "keep_loaded_while_process": [],
+        # keep_alive restored when they exit, so the model unloads later as usual.
+        "idle_keep_alive": "5m",
+        "poll_seconds": 20,
+        # Load the model as soon as a process appears (false: only pin once a request loaded it).
+        "preload": True,
+        "model": "",  # empty = [gateway] default_model
+    },
     "kb": {"embed_model": ""},
     "agent": {"max_steps": 8, "model": "", "temperature": 0.2, "reasoning_effort": "none"},
 }

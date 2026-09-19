@@ -10,6 +10,8 @@ Ollama lacks for this use:
   client can never load a model that does not fit the inference GPU,
 * the resource guard: refuse to *load* a model when memory is tight, and
   unload the resident model when memory runs low,
+* model residency (residency.py): keep the model pinned while configured
+  processes (e.g. a game) run,
 * ``/v1/messages/count_tokens`` (Claude Code calls it; Ollama has none) as a
   character-based estimate,
 * for ``/v1/responses``: Codex's tool namespaces flattened for Ollama and
@@ -38,6 +40,7 @@ from starlette.routing import Route
 from . import codex_compat
 from .config import Config
 from .guard import Guard
+from .residency import Residency
 
 log = logging.getLogger("almanac.gateway")
 
@@ -76,6 +79,12 @@ class Gateway:
         self.guard = guard or Guard(config.section("guard"))
         self.client = client or httpx.AsyncClient(timeout=httpx.Timeout(float(self.settings.get("request_timeout", 600)), connect=5))
         self._token = config.read_token()
+        residency = config.section("residency")
+        model = str(residency.get("model") or self.settings.get("default_model"))
+        if residency.get("keep_loaded_while_process") and model not in self.settings.get("allowed_models", []):
+            log.error("residency disabled: %s is not in [gateway] allowed_models", model)
+            residency = {**residency, "keep_loaded_while_process": []}
+        self.residency = Residency(residency, model, self.backend, self.client, self.guard, config.state_dir)
 
     # -- helpers -----------------------------------------------------------
     def authorized(self, request: Request) -> bool:
@@ -97,7 +106,8 @@ class Gateway:
     # -- routes ------------------------------------------------------------
     async def healthz(self, request: Request) -> Response:
         loaded = await self.loaded_models()
-        return JSONResponse({"ok": True, "backend": self.backend, "loaded": loaded, "may_load": self.guard.may_load(False).reason})
+        return JSONResponse({"ok": True, "backend": self.backend, "loaded": loaded, "may_load": self.guard.may_load(False).reason,
+                             "residency": self.residency.snapshot()})
 
     async def models(self, request: Request) -> Response:
         if not self.authorized(request):
@@ -173,9 +183,10 @@ class Gateway:
     def app(self) -> Starlette:
         @contextlib.asynccontextmanager
         async def lifespan(app: Starlette) -> AsyncIterator[None]:
-            task = asyncio.create_task(self.watch())
+            tasks = [asyncio.create_task(self.watch()), asyncio.create_task(self.residency.run())]
             yield
-            task.cancel()
+            for task in tasks:
+                task.cancel()
             await self.client.aclose()
 
         routes = [

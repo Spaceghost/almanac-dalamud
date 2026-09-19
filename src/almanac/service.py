@@ -30,6 +30,7 @@ from typing import Any
 
 from .config import Config
 from .kb import KnowledgeBase, KnowledgeError, ollama_embedder
+from .residency import STATE_FILE, read_state
 from .tools import Tool, ToolError, execute, load_tools
 
 KB_TOOLS: dict[str, dict[str, Any]] = {
@@ -90,6 +91,14 @@ KB_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["path", "title", "body"],
             "additionalProperties": False,
         },
+    },
+    "model_residency": {
+        "safety": "read",
+        "description": (
+            "Model residency state published by the gateway: whether the local model is pinned because a watched "
+            "process (e.g. a game) is running, released, or deferred by the memory/GPU guard."
+        ),
+        "schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
 }
 
@@ -208,7 +217,7 @@ class Almanac:
                 self.audit("approved", name, args, caller, safety=safety, via="interactive" if approved else "token")
             return self._run(name, args, caller)
         except (ToolError, KnowledgeError) as exc:
-            if name not in ("kb_search", "kb_read", "kb_list"):
+            if name not in ("kb_search", "kb_read", "kb_list", "model_residency"):
                 self.audit("rejected", name, args, caller, error=str(exc))
             return Outcome(text=f"error: {exc}", is_error=True)
 
@@ -232,6 +241,8 @@ class Almanac:
             return Outcome(f"path: {note.path}\nsha256: {note.sha256}\n\n{text}")
         if name == "kb_list":
             return Outcome("\n".join(f"{n['path']} | {n['title']} | hosts: {', '.join(n['hosts'])}" for n in self.kb.list(args.get("kind"))))
+        if name == "model_residency":
+            return self._residency()
         if name == "kb_note":
             result = self._kb_note(args, write=True)
             self.audit("ran", name, {"path": result["path"]}, caller, written=result["written"])
@@ -247,6 +258,18 @@ class Almanac:
         if result.truncated:
             header += "  (output truncated)"
         return Outcome(f"{header}\n{result.output}", is_error=not result.ok)
+
+
+    def _residency(self) -> Outcome:
+        state_dir = self.config.state_dir
+        state = read_state(state_dir)
+        if state is None:
+            return Outcome("residency state unknown: the gateway has not published one (not running yet, or an older version)")
+        try:
+            state["age_seconds"] = round(time.time() - (state_dir / STATE_FILE).stat().st_mtime)
+        except OSError:
+            pass
+        return Outcome(json.dumps(state, indent=1))
 
 
 def load(config_path: str | Path | None = None) -> Almanac:
