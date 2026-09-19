@@ -1,0 +1,286 @@
+"""Command line: ``almanac <command>``. Run ``almanac -h`` for the list."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import logging
+import socket
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+from .config import REPO_ROOT, Config
+from .service import Almanac
+
+
+def _serve(app: Any, listen: list[str]) -> None:
+    """Serve an ASGI app on several host:port addresses with one uvicorn."""
+    import uvicorn
+
+    sockets = []
+    for address in listen:
+        host, _, port = address.rpartition(":")
+        host = host.strip("[]")
+        family = socket.AF_INET6 if ":" in host else socket.AF_INET
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, int(port)))
+        sockets.append(sock)
+        logging.info("listening on %s", address)
+    server = uvicorn.Server(uvicorn.Config(app, log_level="info", access_log=False, lifespan="on"))
+    asyncio.run(server.serve(sockets=sockets))
+
+
+def _kv(pairs: list[str]) -> dict[str, Any]:
+    args: dict[str, Any] = {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep:
+            raise SystemExit(f"expected key=value, got {pair!r}")
+        args[key] = value
+    return args
+
+
+def cmd_init(cfg: Config, _: argparse.Namespace) -> int:
+    created = cfg.ensure_token()
+    print(f"token file: {cfg.token_file} ({'created, mode 0600' if created else 'already present'}; value not shown)")
+    cfg_path = Path("~/.config/almanac/config.toml").expanduser()
+    if not cfg_path.exists():
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
+        cfg_path.write_text((REPO_ROOT / "config.example.toml").read_text())
+        print(f"wrote {cfg_path} from config.example.toml; edit knowledge_dirs, tools_dirs and hosts")
+    return 0
+
+
+def cmd_doctor(cfg: Config, _: argparse.Namespace) -> int:
+    import httpx
+
+    from .guard import Guard
+
+    alm = Almanac(cfg)
+    print(f"knowledge dirs: {', '.join(map(str, cfg.knowledge_dirs))}")
+    print(f"tools dirs:     {', '.join(map(str, cfg.tools_dirs))}")
+    print(f"notes indexed:  {alm.kb.refresh()['notes']}   tools: {len(alm.tools)}   hosts: {', '.join(cfg.hosts)}")
+    print(f"this host:      {cfg.this_host}")
+    print(f"token file:     {cfg.token_file} {'present' if cfg.token_file.exists() else 'MISSING (run almanac init)'}")
+    backend = cfg.section("gateway")["backend"]
+    try:
+        loaded = [m["name"] for m in httpx.get(f"{backend}/api/ps", timeout=5).json()["models"]]
+        print(f"backend:        {backend} reachable; loaded: {', '.join(loaded) or 'none'}")
+    except Exception as exc:
+        print(f"backend:        {backend} unreachable ({exc.__class__.__name__})")
+    print(f"guard:          {Guard(cfg.section('guard')).may_load(False).reason}")
+    return 0
+
+
+def cmd_index(cfg: Config, ns: argparse.Namespace) -> int:
+    print(json.dumps(Almanac(cfg).kb.refresh(embed=ns.embed)))
+    return 0
+
+
+def _print_outcome(alm: Almanac, name: str, args: dict[str, Any], yes: bool) -> int:
+    outcome = alm.call(name, args, caller="cli")
+    if outcome.needs_confirmation:
+        print(outcome.plan)
+        if not (yes or (sys.stdin.isatty() and input("Run it? [y/N] ").strip().lower() == "y")):
+            alm.audit("declined", name, args, "cli")
+            print("not run")
+            return 1
+        outcome = alm.call(name, args, caller="cli", approved=True)
+    print(outcome.text)
+    return 1 if outcome.is_error else 0
+
+
+def cmd_search(cfg: Config, ns: argparse.Namespace) -> int:
+    for hit in Almanac(cfg).kb.search(" ".join(ns.query), ns.host, ns.tag, limit=ns.limit):
+        print(f"{hit['path']:48} {hit['title']}\n    {hit['snippet']}")
+    return 0
+
+
+def cmd_read(cfg: Config, ns: argparse.Namespace) -> int:
+    return _print_outcome(Almanac(cfg), "kb_read", {"path": ns.path}, False)
+
+
+def cmd_note(cfg: Config, ns: argparse.Namespace) -> int:
+    body = Path(ns.body_file).read_text() if ns.body_file != "-" else sys.stdin.read()
+    args: dict[str, Any] = {"path": ns.path, "title": ns.title, "body": body, "safety": ns.safety}
+    if ns.hosts:
+        args["hosts"] = ns.hosts.split(",")
+    if ns.tags:
+        args["tags"] = ns.tags.split(",")
+    alm = Almanac(cfg)
+    if Path(alm.kb.resolve(ns.path, for_write=True)).exists():
+        args["base_sha256"] = alm.kb.load(ns.path).sha256
+    return _print_outcome(alm, "kb_note", args, ns.yes)
+
+
+def cmd_tools(cfg: Config, ns: argparse.Namespace) -> int:
+    alm = Almanac(cfg)
+    for spec in alm.catalogue():
+        if ns.verbose:
+            print(json.dumps(spec, indent=1))
+        else:
+            print(f"{spec['name']:22} {spec['safety']:12} {spec['description'][:90]}")
+    return 0
+
+
+def cmd_tool(cfg: Config, ns: argparse.Namespace) -> int:
+    return _print_outcome(Almanac(cfg), ns.name, _kv(ns.args), ns.yes)
+
+
+def cmd_ask(cfg: Config, ns: argparse.Namespace) -> int:
+    from .agent import Agent, save_run
+
+    alm = Almanac(cfg)
+    try:
+        transcript = Agent(alm, model=ns.model, allow_change=ns.allow_change).run(" ".join(ns.task))
+    except RuntimeError as exc:  # guard refused: memory tight etc.
+        print(str(exc), file=sys.stderr)
+        return 75
+    path = save_run(alm, "ask", transcript)
+    if ns.verbose:
+        print("\n\n".join(transcript.steps), file=sys.stderr)
+    print(transcript.answer)
+    print(f"\n(transcript: {path})", file=sys.stderr)
+    return 0
+
+
+def cmd_run(cfg: Config, ns: argparse.Namespace) -> int:
+    from .agent import runbook_agent, save_run
+
+    alm = Almanac(cfg)
+    agent, text = runbook_agent(alm, ns.runbook, ns.allow_change, model=ns.model)
+    try:
+        transcript = agent.run("Carry out this runbook now.", context=text)
+    except RuntimeError as exc:  # guard refused: memory tight etc.
+        print(str(exc), file=sys.stderr)
+        return 75  # EX_TEMPFAIL: the timer simply tries again next time
+    path = save_run(alm, Path(ns.runbook).stem, transcript)
+    print(transcript.answer)
+    print(f"\n(transcript: {path})", file=sys.stderr)
+    return 0
+
+
+def cmd_mcp(cfg: Config, ns: argparse.Namespace) -> int:
+    from .mcp_server import http_app, serve_stdio
+
+    alm = Almanac(cfg)
+    if ns.stdio:
+        asyncio.run(serve_stdio(alm))
+    else:
+        _serve(http_app(alm), ns.listen or cfg.section("mcp")["listen"])
+    return 0
+
+
+def cmd_gateway(cfg: Config, ns: argparse.Namespace) -> int:
+    from .gateway import Gateway
+
+    _serve(Gateway(cfg).app(), ns.listen or cfg.section("gateway")["listen"])
+    return 0
+
+
+def cmd_model(cfg: Config, ns: argparse.Namespace) -> int:
+    import httpx
+
+    backend = cfg.section("gateway")["backend"]
+    loaded = [m["name"] for m in httpx.get(f"{backend}/api/ps", timeout=5).json()["models"]]
+    if ns.action == "unload":
+        for model in loaded:
+            httpx.post(f"{backend}/api/generate", json={"model": model, "keep_alive": 0}, timeout=30)
+            print(f"unloaded {model}")
+    else:
+        print("loaded: " + (", ".join(loaded) or "none"))
+    return 0
+
+
+def cmd_schedule(cfg: Config, ns: argparse.Namespace) -> int:
+    from .agent import load_runbook
+
+    load_runbook(Almanac(cfg), ns.runbook)  # fail early if it is not a runbook
+    name = Path(ns.runbook).stem
+    unit_dir = Path("~/.config/systemd/user").expanduser()
+    timer = unit_dir / f"almanac-run@{name}.timer"
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    timer.write_text(
+        f"[Unit]\nDescription=almanac runbook {name} ({ns.on_calendar})\n\n"
+        f"[Timer]\nOnCalendar={ns.on_calendar}\nRandomizedDelaySec=5m\nPersistent=true\n\n"
+        "[Install]\nWantedBy=timers.target\n"
+    )
+    print(f"wrote {timer}")
+    commands = [["systemctl", "--user", "daemon-reload"], ["systemctl", "--user", "enable", "--now", timer.name]]
+    if ns.enable:
+        for command in commands:
+            subprocess.run(command, check=True)
+    else:
+        print("enable with:\n  " + "\n  ".join(" ".join(c) for c in commands))
+    return 0
+
+
+def cmd_audit(cfg: Config, ns: argparse.Namespace) -> int:
+    path = cfg.state_dir / "audit.jsonl"
+    lines = path.read_text().splitlines()[-ns.n :] if path.exists() else []
+    for line in lines:
+        record = json.loads(line)
+        print(f"{record['ts']} {record['event']:9} {record['tool']:20} {record['caller']:28} {json.dumps(record.get('args', {}))[:80]}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="almanac", description=__doc__)
+    parser.add_argument("--config", help="config file (default $ALMANAC_CONFIG or ~/.config/almanac/config.toml)")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    def add(name: str, func: Any, help_text: str) -> argparse.ArgumentParser:
+        p = sub.add_parser(name, help=help_text)
+        p.set_defaults(func=func)
+        return p
+
+    add("init", cmd_init, "create the token file and a starter config")
+    add("doctor", cmd_doctor, "show configuration and health (never prints the token)")
+    add("index", cmd_index, "rebuild the knowledge index").add_argument("--embed", action="store_true", help="also compute embeddings")
+    p = add("search", cmd_search, "search the knowledge base")
+    p.add_argument("query", nargs="+")
+    p.add_argument("--host")
+    p.add_argument("--tag")
+    p.add_argument("--limit", type=int, default=8)
+    add("read", cmd_read, "print one note").add_argument("path")
+    p = add("note", cmd_note, "add or update a note (shows the diff, asks before writing)")
+    p.add_argument("path")
+    p.add_argument("--title", required=True)
+    p.add_argument("--body-file", required=True, help="Markdown body file, or - for stdin")
+    p.add_argument("--hosts")
+    p.add_argument("--tags")
+    p.add_argument("--safety", default="read", choices=["read", "change", "destructive"])
+    p.add_argument("--yes", action="store_true")
+    add("tools", cmd_tools, "list tools").add_argument("-v", "--verbose", action="store_true")
+    p = add("tool", cmd_tool, "run one tool: almanac tool NAME key=value ...")
+    p.add_argument("name")
+    p.add_argument("args", nargs="*")
+    p.add_argument("--yes", action="store_true", help="approve a change/destructive plan without prompting")
+    for name, func, text in (("ask", cmd_ask, "ask the local model to do a task"), ("run", cmd_run, "run a runbook with the local model")):
+        p = add(name, func, text)
+        p.add_argument("task" if name == "ask" else "runbook", nargs="+" if name == "ask" else None)
+        p.add_argument("--allow-change", action="store_true", help="offer change tools (each still needs approval)")
+        p.add_argument("--model")
+        p.add_argument("-v", "--verbose", action="store_true")
+    p = add("mcp", cmd_mcp, "serve MCP (HTTP by default)")
+    p.add_argument("--stdio", action="store_true")
+    p.add_argument("--listen", action="append")
+    add("gateway", cmd_gateway, "serve the model gateway").add_argument("--listen", action="append")
+    add("model", cmd_model, "show or unload the resident model").add_argument("action", choices=["status", "unload"], nargs="?", default="status")
+    p = add("schedule", cmd_schedule, "write a systemd user timer for a runbook")
+    p.add_argument("runbook")
+    p.add_argument("--on-calendar", required=True, help="systemd OnCalendar=, e.g. daily or 'Mon *-*-* 09:00'")
+    p.add_argument("--enable", action="store_true")
+    add("audit", cmd_audit, "show the audit log tail").add_argument("-n", type=int, default=20)
+
+    ns = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s", stream=sys.stderr)
+    return int(ns.func(Config.load(ns.config), ns))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
