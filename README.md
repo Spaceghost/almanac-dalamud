@@ -384,8 +384,8 @@ the other FFXIV mods here. In game:
    release, tick **Testing** on Almanac's entry in `/xlplugins`; that opts this
    one plugin in, and nothing else.
 
-The page at <https://spacegho.st/mods/ffxiv/plugins/> says the same thing with
-screenshots' worth of detail, and lists every mod the repository carries.
+The page at <https://spacegho.st/mods/ffxiv/plugins/> walks through the same
+steps and says what every other mod in the repository is.
 
 This is a third-party repository, not the official Dalamud one: Dalamud will
 warn you that nobody but the author has reviewed it, which is true.
