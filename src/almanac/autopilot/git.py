@@ -66,9 +66,10 @@ class GitOps:
         if (path / ".git").exists():
             return path
         self.worktrees.mkdir(parents=True, exist_ok=True)
-        self._ok(["git", "-C", str(repo.path), "fetch", "--quiet", repo.remote, repo.base], repo.path, 600)
-        self._ok(["git", "-C", str(repo.path), "worktree", "add", "-B", branch, str(path), f"{repo.remote}/{repo.base}"], repo.path)
-        self.log(f"worktree {path} on {branch} from {repo.remote}/{repo.base}")
+        if repo.remote:
+            self._ok(["git", "-C", str(repo.path), "fetch", "--quiet", repo.remote, repo.base], repo.path, 600)
+        self._ok(["git", "-C", str(repo.path), "worktree", "add", "-B", branch, str(path), repo.base_ref], repo.path)
+        self.log(f"worktree {path} on {branch} from {repo.base_ref}")
         return path
 
     def remove_worktree(self, repo: Repo, path: Path) -> None:
@@ -83,14 +84,16 @@ class GitOps:
         return True
 
     def ahead(self, repo: Repo, worktree: Path) -> int:
-        out = self._ok(["git", "-C", str(worktree), "rev-list", "--count", f"{repo.remote}/{repo.base}..HEAD"], worktree)
+        out = self._ok(["git", "-C", str(worktree), "rev-list", "--count", f"{repo.base_ref}..HEAD"], worktree)
         return int(out.strip() or 0)
 
     def diffstat(self, repo: Repo, worktree: Path) -> str:
-        return self._ok(["git", "-C", str(worktree), "diff", "--stat", f"{repo.remote}/{repo.base}...HEAD"], worktree)
+        return self._ok(["git", "-C", str(worktree), "diff", "--stat", f"{repo.base_ref}...HEAD"], worktree)
 
     def push(self, repo: Repo, worktree: Path, branch: str) -> None:
         self.check_branch(repo, branch)
+        if not repo.remote:
+            raise GitError(f"repo {repo.name} has no remote; nothing to push to")
         argv = ["git", "-C", str(worktree), "push", "--quiet", repo.remote, f"HEAD:refs/heads/{branch}"]
         if self.dry_run:
             self.log("dry-run: would run " + " ".join(argv))
@@ -98,7 +101,7 @@ class GitOps:
         self._ok(argv, worktree, 600)
 
     def diff(self, repo: Repo, worktree: Path, limit: int = 40000) -> str:
-        return self._ok(["git", "-C", str(worktree), "diff", f"{repo.remote}/{repo.base}...HEAD"], worktree)[:limit]
+        return self._ok(["git", "-C", str(worktree), "diff", f"{repo.base_ref}...HEAD"], worktree)[:limit]
 
     def ensure_labels(self, repo: Repo, worktree: Path, labels: list[str]) -> None:
         for label in labels:

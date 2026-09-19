@@ -584,8 +584,8 @@ class Autopilot:
         repo = self._repo(task)
         if repo is None:
             return Outcome("skip", note="no repository")
-        if not repo.github:
-            return Outcome("owner", note=f"repo {repo.name} has no github = 'owner/name'; the branch is ready but no PR can be opened")
+        if not repo.github or not repo.remote:
+            return Outcome("owner", note=f"repo {repo.name} has no remote/github configured; branch {task.branch} is ready locally for review, no PR opened")
         worktree = self._worktree(task, repo)
         tests = [s for s in task.steps if s.kind == "test" and s.idx < step.idx and s.state != "skipped"]
         if not tests or tests[-1].state != "done":

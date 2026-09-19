@@ -93,7 +93,7 @@ DEFAULTS: dict[str, Any] = {
 REPO_DEFAULTS: dict[str, Any] = {
     "path": "",
     "github": "",  # owner/name, used for gh --repo
-    "remote": "origin",
+    "remote": "origin",  # "" for a repo without a remote: branches stay local, no PR
     "base": "main",
     "test": [],  # argv run inside the worktree, e.g. ["tests/run.sh"]
     "setup": [],  # optional argv before tests (e.g. dependency restore)
@@ -131,6 +131,10 @@ class Repo:
     allow_ssh_hosts: list[str]
     allow_network: bool
     priority: int
+
+    @property
+    def base_ref(self) -> str:
+        return f"{self.remote}/{self.base}" if self.remote else self.base
 
     @classmethod
     def from_config(cls, name: str, raw: dict[str, Any], default_coder: str) -> "Repo":
