@@ -55,8 +55,33 @@ container, not the host. To act on hosts, configure them with
 `transport = "ssh"` and give the container's `almanac` user an SSH key that
 the targets accept (ideally a restricted, read-only account).
 
+## Autopilot in the container
+
+The container can also serve as a **model backend** for an autopilot running
+elsewhere (list its gateway in that machine's `[autopilot.pool.<name>]` with
+`kind = "almanac"` and a copy of the container's token), or run autopilot
+itself:
+
+```sh
+# inside the container, as the almanac user (repos cloned under /home/almanac/src)
+incus exec $R:almanac -- su - almanac -c 'git clone <repo-url> src/<repo>'
+# add [autopilot] (repos, caps, pool; dry_run = true) to ~/.config/almanac/config.toml, then
+incus exec $R:almanac -- su - almanac -c 'almanac autopilot run --once --dry-run'
+incus exec $R:almanac -- su - almanac -c 'XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user enable --now almanac-autopilot'
+```
+
+Pushing and opening draft PRs needs git credentials and `gh` inside the
+container (a fine-grained token limited to the listed repositories, stored
+with `gh auth login` in the container, never in the image or config). Game
+integration only works if the container can reach XivMcp, which normally
+listens on the gaming machine's loopback; without it autopilot runs with no
+game link. `unavailable_while_process` sees only the container's processes,
+so rules about another machine need `check_command`.
+
 ## Untested
 
+* Autopilot inside the container (claude/codex/aider installs, bubblewrap in
+  an unprivileged container).
 * GPU passthrough with `nvidia.runtime` on the target host and whether the
   bundled Ollama CUDA runtime supports an older (e.g. Pascal) GPU.
 * The cloud-init sequence end to end.
