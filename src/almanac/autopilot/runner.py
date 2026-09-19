@@ -212,7 +212,8 @@ class Autopilot:
                 what = self.tick()
                 if what in ("killed", "stopped") or once:
                     break
-                sleep(float(self.s["idle_seconds"] if what in ("idle", "paused") else self.s["tick_seconds"]))
+                if not self._wait(float(self.s["idle_seconds"] if what in ("idle", "paused") else self.s["tick_seconds"]), sleep):
+                    break
         finally:
             self.executor.shutdown(wait=True)  # sessions die within a second of the kill switch
             self.reap()
@@ -220,6 +221,20 @@ class Autopilot:
             self.log(None, "stop", "autopilot stopped")
             self.game.post_status("autopilot stopped", "info")
         return 0
+
+    def _wait(self, seconds: float, sleep: Callable[[float], None]) -> bool:
+        """Sleep between ticks in slices. False = stop now: the kill switch or `stop` arrived.
+
+        Without this an idle loop would hold on to a stop request for a whole
+        idle period; the owner expects `stop --now` to take seconds.
+        """
+        waited = 0.0
+        while waited < seconds:
+            sleep(min(5.0, seconds - waited))
+            waited += 5.0
+            if self._stop or self.killed or self.store.flag("stop"):
+                return False
+        return True
 
     def tick(self) -> str:
         if self.killed:
