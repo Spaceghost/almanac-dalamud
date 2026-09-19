@@ -1,0 +1,62 @@
+# almanac configuration. Copy to ~/.config/almanac/config.toml (almanac init
+# does it) and edit. Every key is optional. No secrets belong here: the bearer
+# token is generated into token_file (0600) by `almanac init`.
+
+# Your knowledge and tools live outside the engine, typically in a private git
+# repo. Several directories are allowed; the first knowledge dir receives new
+# notes, a later tools dir overrides an earlier one's tool of the same name.
+knowledge_dirs = ["~/my-knowledge/knowledge"]
+tools_dirs = ["~/almanac/examples/tools", "~/my-knowledge/tools"]
+disabled_tools = []            # e.g. ["dalamud_plugin_build"]
+# state_dir = "~/.local/state/almanac"   # index, audit.jsonl, runs/
+# token_file = "~/.config/almanac/token"
+# this_host = "example-host"             # default: the short hostname
+
+# Hosts tools can target. "init" picks systemd or openrc command variants.
+[hosts.example-host]
+transport = "local"
+
+[hosts.example-server]
+transport = "ssh"
+ssh = "admin@example-server"   # anything `ssh` accepts; must work non-interactively
+init = "systemd"
+
+[mcp]
+# Add your VPN/Tailscale address to serve other machines, e.g. "100.64.0.10:41880".
+listen = ["127.0.0.1:41880"]
+
+[gateway]
+listen = ["127.0.0.1:41881"]
+backend = "http://127.0.0.1:11434"   # Ollama
+default_model = "qwen3.5:9b"
+allowed_models = ["qwen3.5:9b"]      # only models that fit your inference GPU
+
+[gateway.models]                     # client model name pattern -> local model
+"claude-*" = "qwen3.5:9b"
+"gpt-*" = "qwen3.5:9b"
+"local*" = "qwen3.5:9b"
+
+[guard]
+min_mem_available_mb = 1500          # refuse to load a model below this
+unload_below_mem_available_mb = 900  # unload the resident model below this
+gpu_uuid = ""                        # nvidia-smi -L; enables the VRAM check
+min_gpu_free_mb = 6500
+
+[kb]
+embed_model = ""                     # e.g. "embeddinggemma" once pulled; then `almanac index --embed`
+
+[agent]
+max_steps = 8
+reasoning_effort = "none"            # thinking off: much faster on small models
+
+# Companion MCP servers the local agent may use. Example: XivMcp in FFXIV.
+# [upstreams.xivmcp]
+# url = "http://127.0.0.1:41800/mcp"
+# token_json = "~/.xlcore/pluginConfigs/XivMcp.json"   # read at call time, never copied
+# token_key = "BearerToken"
+# tier_meta = "dev.xivmcp/permission"
+# free_tiers = ["read", "ui"]
+# category_meta = "dev.xivmcp/category"
+# categories = ["character", "inventory", "party", "progress", "world", "ui", "meta", "chat", "actions", "duty", "dalamud"]
+# status_tool = "post_status"
+# status_agent = "almanac"

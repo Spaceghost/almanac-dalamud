@@ -1,0 +1,30 @@
+# Optional: Ollama in a rootless Podman container, limited to ONE GPU via CDI.
+# Use this when the host has no Ollama of its own. Copy to
+# ~/.config/containers/systemd/, replace GPU-REPLACE-WITH-UUID with the UUID
+# from `nvidia-smi -L` (CDI names come from `nvidia-ctk cdi list`), then
+#   systemctl --user daemon-reload && systemctl --user start almanac-ollama
+# Models are stored in the named volume almanac-ollama.
+[Unit]
+Description=Ollama for almanac (one GPU via CDI)
+
+[Container]
+Image=docker.io/ollama/ollama:latest
+ContainerName=almanac-ollama
+AddDevice=nvidia.com/gpu=GPU-REPLACE-WITH-UUID
+SecurityLabelDisable=true
+PublishPort=127.0.0.1:11434:11434
+Volume=almanac-ollama:/root/.ollama
+Environment=OLLAMA_KEEP_ALIVE=5m
+Environment=OLLAMA_MAX_LOADED_MODELS=1
+Environment=OLLAMA_NUM_PARALLEL=1
+Environment=OLLAMA_CONTEXT_LENGTH=32768
+Environment=OLLAMA_FLASH_ATTENTION=1
+Environment=OLLAMA_KV_CACHE_TYPE=q8_0
+Environment=OLLAMA_NO_CLOUD=1
+
+[Service]
+Restart=on-failure
+MemoryMax=4G
+
+[Install]
+WantedBy=default.target

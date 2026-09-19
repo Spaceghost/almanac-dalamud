@@ -1,0 +1,17 @@
+# One runbook run with the local model: `almanac run %i`.
+# Timers are written by `almanac schedule <runbook> --on-calendar ...`.
+# Exit 75 means the resource guard declined (memory tight) and is not a failure.
+[Unit]
+Description=almanac runbook %i
+
+[Service]
+Type=oneshot
+Environment=ALMANAC_PYTHON=%h/.local/share/almanac/venv/bin/python
+ExecStart=%h/.local/share/almanac/venv/bin/almanac run %i
+SuccessExitStatus=75
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=yes
+UMask=0077
+MemoryMax=400M
+TimeoutStartSec=30min

@@ -1,0 +1,18 @@
+# almanac model gateway: Anthropic /v1/messages + OpenAI /v1/chat/completions and
+# /v1/responses in front of Ollama, with auth, model mapping and the memory guard.
+[Unit]
+Description=almanac local model gateway
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/almanac/venv/bin/almanac gateway
+Restart=always
+RestartSec=10
+NoNewPrivileges=yes
+UMask=0077
+MemoryMax=300M
+Nice=5
+
+[Install]
+WantedBy=default.target
