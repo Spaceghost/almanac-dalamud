@@ -1,0 +1,1840 @@
+{
+  "description": "Language-neutral scoring vectors for benchmark/README.md. Both clients (almanac-py and almanac-dalamud) must reproduce every expected value from task + mode + calls + final_answer alone, using the suite named below.",
+  "suite": {
+    "path": "benchmark/suites/ffxiv-core.json",
+    "id": "ffxiv-core",
+    "version": "1.0.0",
+    "sha256": "e8484ee0e0652e6e00f8664c6a97846fd0c8de51430def0d4507c18424a8cf63"
+  },
+  "format": {
+    "calls": "In the order the model made them. name: tool name the model used. arguments: the raw JSON text of the arguments (validate it; do not trust it). result: what the tool returned for that call (mock: the fixture the call resolves to; live: what XivMcp returned); null for an invalid call, which is not executed.",
+    "final_answer": "Content of the reply without tool calls, or null when there was none (step limit). Empty or whitespace-only content also counts as no final answer.",
+    "expected": "tool_score, answer_score (null when skipped in live mode), score, success, error, valid_calls, total_calls. No backend failure (timeout/http) is involved in any vector.",
+    "compare": "Numbers are rounded to 6 decimals here; compare with an absolute tolerance of 1e-6."
+  },
+  "vectors": [
+    {
+      "name": "where_am_i_pass",
+      "note": "contains_from_tool + numbers_from_tool, all pass.",
+      "task": "where_am_i",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "get_location",
+          "arguments": "{}",
+          "result": {
+            "territory": {
+              "id": 129,
+              "name": "Limsa Lominsa Lower Decks",
+              "region": "La Noscea",
+              "zone": "Limsa Lominsa",
+              "intendedUse": "Town",
+              "isPvp": false,
+              "mountsAllowed": false
+            },
+            "map": {
+              "id": 12,
+              "name": "Limsa Lominsa Lower Decks"
+            },
+            "area": "The Aftcastle",
+            "subArea": null,
+            "instance": 0,
+            "position": {
+              "x": 17.3,
+              "y": 40.1,
+              "z": 118.9
+            },
+            "mapCoordinates": {
+              "x": 9.4,
+              "y": 11.8
+            },
+            "weather": {
+              "id": 2,
+              "name": "Fair Skies"
+            },
+            "inSanctuary": true,
+            "canFly": false,
+            "nearestAetheryte": {
+              "id": 8,
+              "name": "Limsa Lominsa",
+              "isAethernetShard": false,
+              "unlocked": true,
+              "mapCoordinates": {
+                "x": 9.5,
+                "y": 11.4
+              },
+              "mapDistance": 0.41
+            },
+            "nearestAethernetShard": {
+              "id": 41,
+              "name": "The Aftcastle",
+              "isAethernetShard": true,
+              "unlocked": true,
+              "mapCoordinates": {
+                "x": 9.3,
+                "y": 12.0
+              },
+              "mapDistance": 0.22
+            }
+          }
+        }
+      ],
+      "final_answer": "You are in Limsa Lominsa Lower Decks at X 9.4, Y 11.8.",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 1,
+        "score": 1,
+        "success": true,
+        "error": null,
+        "valid_calls": 1,
+        "total_calls": 1
+      }
+    },
+    {
+      "name": "where_am_i_coordinate_off",
+      "note": "x: |9.6-9.4| = 0.2 > 0.15 fails; 2 of 3 checks pass.",
+      "task": "where_am_i",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "get_location",
+          "arguments": "{}",
+          "result": {
+            "territory": {
+              "id": 129,
+              "name": "Limsa Lominsa Lower Decks",
+              "region": "La Noscea",
+              "zone": "Limsa Lominsa",
+              "intendedUse": "Town",
+              "isPvp": false,
+              "mountsAllowed": false
+            },
+            "map": {
+              "id": 12,
+              "name": "Limsa Lominsa Lower Decks"
+            },
+            "area": "The Aftcastle",
+            "subArea": null,
+            "instance": 0,
+            "position": {
+              "x": 17.3,
+              "y": 40.1,
+              "z": 118.9
+            },
+            "mapCoordinates": {
+              "x": 9.4,
+              "y": 11.8
+            },
+            "weather": {
+              "id": 2,
+              "name": "Fair Skies"
+            },
+            "inSanctuary": true,
+            "canFly": false,
+            "nearestAetheryte": {
+              "id": 8,
+              "name": "Limsa Lominsa",
+              "isAethernetShard": false,
+              "unlocked": true,
+              "mapCoordinates": {
+                "x": 9.5,
+                "y": 11.4
+              },
+              "mapDistance": 0.41
+            },
+            "nearestAethernetShard": {
+              "id": 41,
+              "name": "The Aftcastle",
+              "isAethernetShard": true,
+              "unlocked": true,
+              "mapCoordinates": {
+                "x": 9.3,
+                "y": 12.0
+              },
+              "mapDistance": 0.22
+            }
+          }
+        }
+      ],
+      "final_answer": "Limsa Lominsa Lower Decks (9.6, 11.8)",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 0.666667,
+        "score": 0.833333,
+        "success": false,
+        "error": "wrong_answer",
+        "valid_calls": 1,
+        "total_calls": 1
+      }
+    },
+    {
+      "name": "where_am_i_tolerance_edge",
+      "note": "Differences of exactly the tolerance (0.15) pass; compare with an absolute epsilon of 1e-9 because 9.55-9.4 is 0.15000000000000036 in binary floating point.",
+      "task": "where_am_i",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "get_location",
+          "arguments": "{}",
+          "result": {
+            "territory": {
+              "id": 129,
+              "name": "Limsa Lominsa Lower Decks",
+              "region": "La Noscea",
+              "zone": "Limsa Lominsa",
+              "intendedUse": "Town",
+              "isPvp": false,
+              "mountsAllowed": false
+            },
+            "map": {
+              "id": 12,
+              "name": "Limsa Lominsa Lower Decks"
+            },
+            "area": "The Aftcastle",
+            "subArea": null,
+            "instance": 0,
+            "position": {
+              "x": 17.3,
+              "y": 40.1,
+              "z": 118.9
+            },
+            "mapCoordinates": {
+              "x": 9.4,
+              "y": 11.8
+            },
+            "weather": {
+              "id": 2,
+              "name": "Fair Skies"
+            },
+            "inSanctuary": true,
+            "canFly": false,
+            "nearestAetheryte": {
+              "id": 8,
+              "name": "Limsa Lominsa",
+              "isAethernetShard": false,
+              "unlocked": true,
+              "mapCoordinates": {
+                "x": 9.5,
+                "y": 11.4
+              },
+              "mapDistance": 0.41
+            },
+            "nearestAethernetShard": {
+              "id": 41,
+              "name": "The Aftcastle",
+              "isAethernetShard": true,
+              "unlocked": true,
+              "mapCoordinates": {
+                "x": 9.3,
+                "y": 12.0
+              },
+              "mapDistance": 0.22
+            }
+          }
+        }
+      ],
+      "final_answer": "Limsa Lominsa Lower Decks, 9.55 / 11.65",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 1,
+        "score": 1,
+        "success": true,
+        "error": null,
+        "valid_calls": 1,
+        "total_calls": 1
+      }
+    },
+    {
+      "name": "exact_code_fence",
+      "note": "exact: one surrounding code fence is stripped.",
+      "task": "command_gearset",
+      "mode": "mock",
+      "calls": [],
+      "final_answer": "```\n/gearset change 3\n```",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 1,
+        "score": 1,
+        "success": true,
+        "error": null,
+        "valid_calls": 0,
+        "total_calls": 0
+      }
+    },
+    {
+      "name": "exact_backticks_case_whitespace",
+      "note": "exact: wrapping backticks stripped, whitespace collapsed, case-insensitive.",
+      "task": "command_hudlayout",
+      "mode": "mock",
+      "calls": [],
+      "final_answer": "`/HUDLayout   2`",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 1,
+        "score": 1,
+        "success": true,
+        "error": null,
+        "valid_calls": 0,
+        "total_calls": 0
+      }
+    },
+    {
+      "name": "exact_trailing_dot",
+      "note": "exact: one trailing '.' dropped.",
+      "task": "command_hudlayout",
+      "mode": "mock",
+      "calls": [],
+      "final_answer": "/hudlayout 2.",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 1,
+        "score": 1,
+        "success": true,
+        "error": null,
+        "valid_calls": 0,
+        "total_calls": 0
+      }
+    },
+    {
+      "name": "exact_extra_words",
+      "note": "exact: surrounding prose fails.",
+      "task": "command_hudlayout",
+      "mode": "mock",
+      "calls": [],
+      "final_answer": "Use /hudlayout 2 to switch.",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 0,
+        "score": 0.5,
+        "success": false,
+        "error": "wrong_answer",
+        "valid_calls": 0,
+        "total_calls": 0
+      }
+    },
+    {
+      "name": "path_selector",
+      "note": "aetherytes[name~Moraby].gilCost = 243 (the fallback fixture, since 'Moraby' matches no other when).",
+      "task": "teleport_cost",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "list_aetherytes",
+          "arguments": "{\"nameContains\":\"Moraby\"}",
+          "result": {
+            "total": 5,
+            "offset": 0,
+            "returned": 5,
+            "truncated": false,
+            "aetherytes": [
+              {
+                "aetheryteId": 8,
+                "name": "Limsa Lominsa",
+                "territoryId": 129,
+                "zone": "Limsa Lominsa Lower Decks",
+                "region": "La Noscea",
+                "gilCost": 0,
+                "isFavourite": false,
+                "isHomePoint": true,
+                "isInCurrentZone": true,
+                "unlocked": true
+              },
+              {
+                "aetheryteId": 52,
+                "name": "Summerford Farms",
+                "territoryId": 134,
+                "zone": "Middle La Noscea",
+                "region": "La Noscea",
+                "gilCost": 206,
+                "isFavourite": false,
+                "isHomePoint": false,
+                "isInCurrentZone": false,
+                "unlocked": true
+              },
+              {
+                "aetheryteId": 10,
+                "name": "Moraby Drydocks",
+                "territoryId": 135,
+                "zone": "Lower La Noscea",
+                "region": "La Noscea",
+                "gilCost": 243,
+                "isFavourite": true,
+                "isHomePoint": false,
+                "isInCurrentZone": false,
+                "unlocked": true
+              },
+              {
+                "aetheryteId": 11,
+                "name": "Costa del Sol",
+                "territoryId": 137,
+                "zone": "Eastern La Noscea",
+                "region": "La Noscea",
+                "gilCost": 288,
+                "isFavourite": false,
+                "isHomePoint": false,
+                "isInCurrentZone": false,
+                "unlocked": true
+              },
+              {
+                "aetheryteId": 9,
+                "name": "Ul'dah - Steps of Nald",
+                "territoryId": 130,
+                "zone": "Ul'dah - Steps of Nald",
+                "region": "Thanalan",
+                "gilCost": 587,
+                "isFavourite": false,
+                "isHomePoint": false,
+                "isInCurrentZone": false,
+                "unlocked": true
+              }
+            ]
+          }
+        }
+      ],
+      "final_answer": "243 gil.",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 1,
+        "score": 1,
+        "success": true,
+        "error": null,
+        "valid_calls": 1,
+        "total_calls": 1
+      }
+    },
+    {
+      "name": "thousands_separator",
+      "note": "'1,243' is read as 1243 (separator removed), so it does not match 243.",
+      "task": "teleport_cost",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "list_aetherytes",
+          "arguments": "{\"nameContains\":\"Moraby\"}",
+          "result": {
+            "total": 5,
+            "offset": 0,
+            "returned": 5,
+            "truncated": false,
+            "aetherytes": [
+              {
+                "aetheryteId": 8,
+                "name": "Limsa Lominsa",
+                "territoryId": 129,
+                "zone": "Limsa Lominsa Lower Decks",
+                "region": "La Noscea",
+                "gilCost": 0,
+                "isFavourite": false,
+                "isHomePoint": true,
+                "isInCurrentZone": true,
+                "unlocked": true
+              },
+              {
+                "aetheryteId": 52,
+                "name": "Summerford Farms",
+                "territoryId": 134,
+                "zone": "Middle La Noscea",
+                "region": "La Noscea",
+                "gilCost": 206,
+                "isFavourite": false,
+                "isHomePoint": false,
+                "isInCurrentZone": false,
+                "unlocked": true
+              },
+              {
+                "aetheryteId": 10,
+                "name": "Moraby Drydocks",
+                "territoryId": 135,
+                "zone": "Lower La Noscea",
+                "region": "La Noscea",
+                "gilCost": 243,
+                "isFavourite": true,
+                "isHomePoint": false,
+                "isInCurrentZone": false,
+                "unlocked": true
+              },
+              {
+                "aetheryteId": 11,
+                "name": "Costa del Sol",
+                "territoryId": 137,
+                "zone": "Eastern La Noscea",
+                "region": "La Noscea",
+                "gilCost": 288,
+                "isFavourite": false,
+                "isHomePoint": false,
+                "isInCurrentZone": false,
+                "unlocked": true
+              },
+              {
+                "aetheryteId": 9,
+                "name": "Ul'dah - Steps of Nald",
+                "territoryId": 130,
+                "zone": "Ul'dah - Steps of Nald",
+                "region": "Thanalan",
+                "gilCost": 587,
+                "isFavourite": false,
+                "isHomePoint": false,
+                "isInCurrentZone": false,
+                "unlocked": true
+              }
+            ]
+          }
+        }
+      ],
+      "final_answer": "It costs 1,243 gil.",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 0,
+        "score": 0.5,
+        "success": false,
+        "error": "wrong_answer",
+        "valid_calls": 1,
+        "total_calls": 1
+      }
+    },
+    {
+      "name": "first_result_only",
+      "note": "The expected call is matched by the second call, but numbers_from_tool reads the FIRST search_quests result, which has no results[name~Pirates], so the check fails.",
+      "task": "quest_level",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "search_quests",
+          "arguments": "{\"query\":\"Probably\"}",
+          "result": {
+            "total": 0,
+            "offset": 0,
+            "returned": 0,
+            "truncated": false,
+            "results": []
+          }
+        },
+        {
+          "name": "search_quests",
+          "arguments": "{\"query\":\"It's Probably Pirates\"}",
+          "result": {
+            "total": 1,
+            "offset": 0,
+            "returned": 1,
+            "truncated": false,
+            "results": [
+              {
+                "id": 65999,
+                "name": "It's Probably Pirates",
+                "level": 13,
+                "genre": "Main Scenario (A Realm Reborn)",
+                "expansion": "A Realm Reborn"
+              }
+            ]
+          }
+        }
+      ],
+      "final_answer": "Level 13.",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 0,
+        "score": 0.5,
+        "success": false,
+        "error": "wrong_answer",
+        "valid_calls": 2,
+        "total_calls": 2
+      }
+    },
+    {
+      "name": "approx_pass",
+      "note": "approx: |11.23-11.2| = 0.03 <= 0.05.",
+      "task": "flag_coordinates",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "set_map_flag",
+          "arguments": "{\"x\":11.23,\"y\":14.5,\"openMap\":true}",
+          "result": {
+            "territoryId": 129,
+            "mapId": 12,
+            "placeName": "Limsa Lominsa Lower Decks",
+            "placeNameSub": null,
+            "mapX": 11.2,
+            "mapY": 14.5,
+            "worldX": 52.4,
+            "worldZ": 163.0,
+            "mapOpened": true
+          }
+        }
+      ],
+      "final_answer": "Flag placed at 11.2, 14.5.",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 1,
+        "score": 1,
+        "success": true,
+        "error": null,
+        "valid_calls": 1,
+        "total_calls": 1
+      }
+    },
+    {
+      "name": "approx_fail",
+      "note": "approx: |11.3-11.2| = 0.1 > 0.05, so tool score 0; the answer passes, so error is null although the task did not succeed.",
+      "task": "flag_coordinates",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "set_map_flag",
+          "arguments": "{\"x\":11.3,\"y\":14.5}",
+          "result": {
+            "territoryId": 129,
+            "mapId": 12,
+            "placeName": "Limsa Lominsa Lower Decks",
+            "placeNameSub": null,
+            "mapX": 11.2,
+            "mapY": 14.5,
+            "worldX": 52.4,
+            "worldZ": 163.0,
+            "mapOpened": true
+          }
+        }
+      ],
+      "final_answer": "Placed a flag.",
+      "expected": {
+        "tool_score": 0,
+        "answer_score": 1,
+        "score": 0.5,
+        "success": false,
+        "error": null,
+        "valid_calls": 1,
+        "total_calls": 1
+      }
+    },
+    {
+      "name": "icontains_any",
+      "note": "icontains_any is case-insensitive substring (fixture and expected call).",
+      "task": "aetherytes_filtered",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "list_aetherytes",
+          "arguments": "{\"nameContains\":\"LA NOSCEA\"}",
+          "result": {
+            "total": 3,
+            "offset": 0,
+            "returned": 3,
+            "truncated": false,
+            "aetherytes": [
+              {
+                "aetheryteId": 52,
+                "name": "Summerford Farms",
+                "territoryId": 134,
+                "zone": "Middle La Noscea",
+                "region": "La Noscea",
+                "gilCost": 206,
+                "isFavourite": false,
+                "isHomePoint": false,
+                "isInCurrentZone": false,
+                "unlocked": true
+              },
+              {
+                "aetheryteId": 10,
+                "name": "Moraby Drydocks",
+                "territoryId": 135,
+                "zone": "Lower La Noscea",
+                "region": "La Noscea",
+                "gilCost": 243,
+                "isFavourite": true,
+                "isHomePoint": false,
+                "isInCurrentZone": false,
+                "unlocked": true
+              },
+              {
+                "aetheryteId": 11,
+                "name": "Costa del Sol",
+                "territoryId": 137,
+                "zone": "Eastern La Noscea",
+                "region": "La Noscea",
+                "gilCost": 288,
+                "isFavourite": false,
+                "isHomePoint": false,
+                "isInCurrentZone": false,
+                "unlocked": true
+              }
+            ]
+          }
+        }
+      ],
+      "final_answer": "Summerford Farms, Moraby Drydocks and Costa del Sol.",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 1,
+        "score": 1,
+        "success": true,
+        "error": null,
+        "valid_calls": 1,
+        "total_calls": 1
+      }
+    },
+    {
+      "name": "eq_numeric_integer",
+      "note": "135.0 is a valid 'integer' (JSON Schema: a number with zero fractional part) and eq 135 compares numerically.",
+      "task": "weather_rain_zone",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "get_weather_forecast",
+          "arguments": "{\"territoryId\":135.0}",
+          "result": {
+            "territoryId": 135,
+            "territoryName": "Lower La Noscea",
+            "weatherRateId": 16,
+            "possibleWeather": [
+              {
+                "id": 1,
+                "name": "Clear Skies",
+                "chancePercent": 20
+              },
+              {
+                "id": 2,
+                "name": "Fair Skies",
+                "chancePercent": 50
+              },
+              {
+                "id": 3,
+                "name": "Clouds",
+                "chancePercent": 10
+              },
+              {
+                "id": 4,
+                "name": "Fog",
+                "chancePercent": 10
+              },
+              {
+                "id": 7,
+                "name": "Rain",
+                "chancePercent": 10
+              }
+            ],
+            "forecast": [
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T12:00:00Z",
+                "endUtc": "2026-01-01T12:23:20Z",
+                "eorzeaStart": "08:00",
+                "secondsUntilStart": -300,
+                "isCurrent": true
+              },
+              {
+                "weatherId": 3,
+                "name": "Clouds",
+                "startUtc": "2026-01-01T12:23:20Z",
+                "endUtc": "2026-01-01T12:46:40Z",
+                "eorzeaStart": "16:00",
+                "secondsUntilStart": 1100,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 7,
+                "name": "Rain",
+                "startUtc": "2026-01-01T12:46:40Z",
+                "endUtc": "2026-01-01T13:10:00Z",
+                "eorzeaStart": "00:00",
+                "secondsUntilStart": 2500,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T13:10:00Z",
+                "endUtc": "2026-01-01T13:33:20Z",
+                "eorzeaStart": "08:00",
+                "secondsUntilStart": 3900,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 1,
+                "name": "Clear Skies",
+                "startUtc": "2026-01-01T13:33:20Z",
+                "endUtc": "2026-01-01T13:56:40Z",
+                "eorzeaStart": "16:00",
+                "secondsUntilStart": 5300,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T13:56:40Z",
+                "endUtc": "2026-01-01T14:20:00Z",
+                "eorzeaStart": "00:00",
+                "secondsUntilStart": 6700,
+                "isCurrent": false
+              }
+            ],
+            "note": "Mock data."
+          }
+        }
+      ],
+      "final_answer": "Yes, Rain at 00:00.",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 1,
+        "score": 1,
+        "success": true,
+        "error": null,
+        "valid_calls": 1,
+        "total_calls": 1
+      }
+    },
+    {
+      "name": "live_answer_skip",
+      "note": "Live mode with \"live\": {\"answer\": \"skip\"}: no answer score; task score = tool score.",
+      "task": "aetherytes_filtered",
+      "mode": "live",
+      "calls": [
+        {
+          "name": "list_aetherytes",
+          "arguments": "{\"nameContains\":\"Noscea\"}",
+          "result": {
+            "total": 1,
+            "aetherytes": [
+              {
+                "name": "Summerford Farms",
+                "gilCost": 120
+              }
+            ]
+          }
+        }
+      ],
+      "final_answer": "Only Summerford Farms.",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": null,
+        "score": 1,
+        "success": true,
+        "error": null,
+        "valid_calls": 1,
+        "total_calls": 1
+      }
+    },
+    {
+      "name": "live_results_used",
+      "note": "Live mode: *_from_tool checks use what XivMcp actually returned, not the fixtures.",
+      "task": "where_am_i",
+      "mode": "live",
+      "calls": [
+        {
+          "name": "get_location",
+          "arguments": "{}",
+          "result": {
+            "territory": {
+              "name": "New Gridania"
+            },
+            "mapCoordinates": {
+              "x": 11.1,
+              "y": 13.2
+            }
+          }
+        }
+      ],
+      "final_answer": "You're in New Gridania at 11.1, 13.2.",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 1,
+        "score": 1,
+        "success": true,
+        "error": null,
+        "valid_calls": 1,
+        "total_calls": 1
+      }
+    },
+    {
+      "name": "forbid_any_call",
+      "note": "forbid_any_call: any call (even valid) makes the tool score 0.",
+      "task": "restraint_general",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "get_location",
+          "arguments": "{}",
+          "result": {
+            "territory": {
+              "id": 129,
+              "name": "Limsa Lominsa Lower Decks",
+              "region": "La Noscea",
+              "zone": "Limsa Lominsa",
+              "intendedUse": "Town",
+              "isPvp": false,
+              "mountsAllowed": false
+            },
+            "map": {
+              "id": 12,
+              "name": "Limsa Lominsa Lower Decks"
+            },
+            "area": "The Aftcastle",
+            "subArea": null,
+            "instance": 0,
+            "position": {
+              "x": 17.3,
+              "y": 40.1,
+              "z": 118.9
+            },
+            "mapCoordinates": {
+              "x": 9.4,
+              "y": 11.8
+            },
+            "weather": {
+              "id": 2,
+              "name": "Fair Skies"
+            },
+            "inSanctuary": true,
+            "canFly": false,
+            "nearestAetheryte": {
+              "id": 8,
+              "name": "Limsa Lominsa",
+              "isAethernetShard": false,
+              "unlocked": true,
+              "mapCoordinates": {
+                "x": 9.5,
+                "y": 11.4
+              },
+              "mapDistance": 0.41
+            },
+            "nearestAethernetShard": {
+              "id": 41,
+              "name": "The Aftcastle",
+              "isAethernetShard": true,
+              "unlocked": true,
+              "mapCoordinates": {
+                "x": 9.3,
+                "y": 12.0
+              },
+              "mapDistance": 0.22
+            }
+          }
+        }
+      ],
+      "final_answer": "The Duty Finder queues you with a party for duties.",
+      "expected": {
+        "tool_score": 0,
+        "answer_score": 1,
+        "score": 0.5,
+        "success": false,
+        "error": null,
+        "valid_calls": 1,
+        "total_calls": 1
+      }
+    },
+    {
+      "name": "restraint_pass",
+      "note": "No calls, contains_any and max_chars pass.",
+      "task": "restraint_general",
+      "mode": "mock",
+      "calls": [],
+      "final_answer": "It matches you with other players into a party for duties.",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 1,
+        "score": 1,
+        "success": true,
+        "error": null,
+        "valid_calls": 0,
+        "total_calls": 0
+      }
+    },
+    {
+      "name": "unknown_tool",
+      "note": "Unknown tool: invalid, not executed; expect.calls is empty so tool score 1 * valid/all = 1 * 0/1 = 0.",
+      "task": "command_gearset",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "run_command",
+          "arguments": "{\"command\":\"/gearset change 3\"}",
+          "result": null
+        }
+      ],
+      "final_answer": "/gearset change 3",
+      "expected": {
+        "tool_score": 0,
+        "answer_score": 1,
+        "score": 0.5,
+        "success": false,
+        "error": "bad_tool_call",
+        "valid_calls": 0,
+        "total_calls": 1
+      }
+    },
+    {
+      "name": "bad_type_then_retry",
+      "note": "A string for an integer is invalid; the retry matches: 1/1 * 1/2.",
+      "task": "weather_rain_zone",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "get_weather_forecast",
+          "arguments": "{\"territoryId\":\"135\"}",
+          "result": null
+        },
+        {
+          "name": "get_weather_forecast",
+          "arguments": "{\"territoryId\":135}",
+          "result": {
+            "territoryId": 135,
+            "territoryName": "Lower La Noscea",
+            "weatherRateId": 16,
+            "possibleWeather": [
+              {
+                "id": 1,
+                "name": "Clear Skies",
+                "chancePercent": 20
+              },
+              {
+                "id": 2,
+                "name": "Fair Skies",
+                "chancePercent": 50
+              },
+              {
+                "id": 3,
+                "name": "Clouds",
+                "chancePercent": 10
+              },
+              {
+                "id": 4,
+                "name": "Fog",
+                "chancePercent": 10
+              },
+              {
+                "id": 7,
+                "name": "Rain",
+                "chancePercent": 10
+              }
+            ],
+            "forecast": [
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T12:00:00Z",
+                "endUtc": "2026-01-01T12:23:20Z",
+                "eorzeaStart": "08:00",
+                "secondsUntilStart": -300,
+                "isCurrent": true
+              },
+              {
+                "weatherId": 3,
+                "name": "Clouds",
+                "startUtc": "2026-01-01T12:23:20Z",
+                "endUtc": "2026-01-01T12:46:40Z",
+                "eorzeaStart": "16:00",
+                "secondsUntilStart": 1100,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 7,
+                "name": "Rain",
+                "startUtc": "2026-01-01T12:46:40Z",
+                "endUtc": "2026-01-01T13:10:00Z",
+                "eorzeaStart": "00:00",
+                "secondsUntilStart": 2500,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T13:10:00Z",
+                "endUtc": "2026-01-01T13:33:20Z",
+                "eorzeaStart": "08:00",
+                "secondsUntilStart": 3900,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 1,
+                "name": "Clear Skies",
+                "startUtc": "2026-01-01T13:33:20Z",
+                "endUtc": "2026-01-01T13:56:40Z",
+                "eorzeaStart": "16:00",
+                "secondsUntilStart": 5300,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T13:56:40Z",
+                "endUtc": "2026-01-01T14:20:00Z",
+                "eorzeaStart": "00:00",
+                "secondsUntilStart": 6700,
+                "isCurrent": false
+              }
+            ],
+            "note": "Mock data."
+          }
+        }
+      ],
+      "final_answer": "Yes, Rain starts at 00:00.",
+      "expected": {
+        "tool_score": 0.5,
+        "answer_score": 1,
+        "score": 0.75,
+        "success": false,
+        "error": "bad_tool_call",
+        "valid_calls": 1,
+        "total_calls": 2
+      }
+    },
+    {
+      "name": "additional_properties_and_bad_json",
+      "note": "additionalProperties: false and unparseable arguments are invalid: 1/1 * 1/3.",
+      "task": "where_am_i",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "get_location",
+          "arguments": "{\"verbose\":true}",
+          "result": null
+        },
+        {
+          "name": "get_location",
+          "arguments": "{\"verbose\":",
+          "result": null
+        },
+        {
+          "name": "get_location",
+          "arguments": "{}",
+          "result": {
+            "territory": {
+              "id": 129,
+              "name": "Limsa Lominsa Lower Decks",
+              "region": "La Noscea",
+              "zone": "Limsa Lominsa",
+              "intendedUse": "Town",
+              "isPvp": false,
+              "mountsAllowed": false
+            },
+            "map": {
+              "id": 12,
+              "name": "Limsa Lominsa Lower Decks"
+            },
+            "area": "The Aftcastle",
+            "subArea": null,
+            "instance": 0,
+            "position": {
+              "x": 17.3,
+              "y": 40.1,
+              "z": 118.9
+            },
+            "mapCoordinates": {
+              "x": 9.4,
+              "y": 11.8
+            },
+            "weather": {
+              "id": 2,
+              "name": "Fair Skies"
+            },
+            "inSanctuary": true,
+            "canFly": false,
+            "nearestAetheryte": {
+              "id": 8,
+              "name": "Limsa Lominsa",
+              "isAethernetShard": false,
+              "unlocked": true,
+              "mapCoordinates": {
+                "x": 9.5,
+                "y": 11.4
+              },
+              "mapDistance": 0.41
+            },
+            "nearestAethernetShard": {
+              "id": 41,
+              "name": "The Aftcastle",
+              "isAethernetShard": true,
+              "unlocked": true,
+              "mapCoordinates": {
+                "x": 9.3,
+                "y": 12.0
+              },
+              "mapDistance": 0.22
+            }
+          }
+        }
+      ],
+      "final_answer": "You are in Limsa Lominsa Lower Decks at X 9.4, Y 11.8.",
+      "expected": {
+        "tool_score": 0.333333,
+        "answer_score": 1,
+        "score": 0.666667,
+        "success": false,
+        "error": "bad_tool_call",
+        "valid_calls": 1,
+        "total_calls": 3
+      }
+    },
+    {
+      "name": "enum_and_maximum",
+      "note": "count 30 > maximum 24 and state not in enum are invalid; all 3 expected calls match: 3/3 * 3/5.",
+      "task": "multi_step_status",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "get_location",
+          "arguments": "{}",
+          "result": {
+            "territory": {
+              "id": 129,
+              "name": "Limsa Lominsa Lower Decks",
+              "region": "La Noscea",
+              "zone": "Limsa Lominsa",
+              "intendedUse": "Town",
+              "isPvp": false,
+              "mountsAllowed": false
+            },
+            "map": {
+              "id": 12,
+              "name": "Limsa Lominsa Lower Decks"
+            },
+            "area": "The Aftcastle",
+            "subArea": null,
+            "instance": 0,
+            "position": {
+              "x": 17.3,
+              "y": 40.1,
+              "z": 118.9
+            },
+            "mapCoordinates": {
+              "x": 9.4,
+              "y": 11.8
+            },
+            "weather": {
+              "id": 2,
+              "name": "Fair Skies"
+            },
+            "inSanctuary": true,
+            "canFly": false,
+            "nearestAetheryte": {
+              "id": 8,
+              "name": "Limsa Lominsa",
+              "isAethernetShard": false,
+              "unlocked": true,
+              "mapCoordinates": {
+                "x": 9.5,
+                "y": 11.4
+              },
+              "mapDistance": 0.41
+            },
+            "nearestAethernetShard": {
+              "id": 41,
+              "name": "The Aftcastle",
+              "isAethernetShard": true,
+              "unlocked": true,
+              "mapCoordinates": {
+                "x": 9.3,
+                "y": 12.0
+              },
+              "mapDistance": 0.22
+            }
+          }
+        },
+        {
+          "name": "get_weather_forecast",
+          "arguments": "{\"count\":30}",
+          "result": null
+        },
+        {
+          "name": "get_weather_forecast",
+          "arguments": "{\"count\":2}",
+          "result": {
+            "territoryId": 129,
+            "territoryName": "Limsa Lominsa Lower Decks",
+            "weatherRateId": 14,
+            "currentWeatherInGame": {
+              "id": 2,
+              "name": "Fair Skies"
+            },
+            "possibleWeather": [
+              {
+                "id": 1,
+                "name": "Clear Skies",
+                "chancePercent": 20
+              },
+              {
+                "id": 2,
+                "name": "Fair Skies",
+                "chancePercent": 40
+              },
+              {
+                "id": 3,
+                "name": "Clouds",
+                "chancePercent": 20
+              },
+              {
+                "id": 7,
+                "name": "Rain",
+                "chancePercent": 20
+              }
+            ],
+            "forecast": [
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T12:00:00Z",
+                "endUtc": "2026-01-01T12:23:20Z",
+                "eorzeaStart": "08:00",
+                "secondsUntilStart": -300,
+                "isCurrent": true
+              },
+              {
+                "weatherId": 3,
+                "name": "Clouds",
+                "startUtc": "2026-01-01T12:23:20Z",
+                "endUtc": "2026-01-01T12:46:40Z",
+                "eorzeaStart": "16:00",
+                "secondsUntilStart": 1100,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 1,
+                "name": "Clear Skies",
+                "startUtc": "2026-01-01T12:46:40Z",
+                "endUtc": "2026-01-01T13:10:00Z",
+                "eorzeaStart": "00:00",
+                "secondsUntilStart": 2500,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 7,
+                "name": "Rain",
+                "startUtc": "2026-01-01T13:10:00Z",
+                "endUtc": "2026-01-01T13:33:20Z",
+                "eorzeaStart": "08:00",
+                "secondsUntilStart": 3900,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T13:33:20Z",
+                "endUtc": "2026-01-01T13:56:40Z",
+                "eorzeaStart": "16:00",
+                "secondsUntilStart": 5300,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T13:56:40Z",
+                "endUtc": "2026-01-01T14:20:00Z",
+                "eorzeaStart": "00:00",
+                "secondsUntilStart": 6700,
+                "isCurrent": false
+              }
+            ],
+            "note": "Mock data."
+          }
+        },
+        {
+          "name": "post_status",
+          "arguments": "{\"agent\":\"almanac-bench\",\"status\":\"Limsa, clouds next\",\"state\":\"finished\"}",
+          "result": null
+        },
+        {
+          "name": "post_status",
+          "arguments": "{\"agent\":\"almanac-bench\",\"status\":\"Limsa, clouds next\",\"state\":\"done\"}",
+          "result": {
+            "agent": "almanac-bench",
+            "state": "done",
+            "updated": true
+          }
+        }
+      ],
+      "final_answer": "Posted: you are in Limsa Lominsa Lower Decks; clouds next.",
+      "expected": {
+        "tool_score": 0.6,
+        "answer_score": 1,
+        "score": 0.8,
+        "success": false,
+        "error": "bad_tool_call",
+        "valid_calls": 3,
+        "total_calls": 5
+      }
+    },
+    {
+      "name": "partial_expected_calls",
+      "note": "post_status agent must eq \"almanac-bench\": 2 of 3 expected calls match.",
+      "task": "multi_step_status",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "get_location",
+          "arguments": "{}",
+          "result": {
+            "territory": {
+              "id": 129,
+              "name": "Limsa Lominsa Lower Decks",
+              "region": "La Noscea",
+              "zone": "Limsa Lominsa",
+              "intendedUse": "Town",
+              "isPvp": false,
+              "mountsAllowed": false
+            },
+            "map": {
+              "id": 12,
+              "name": "Limsa Lominsa Lower Decks"
+            },
+            "area": "The Aftcastle",
+            "subArea": null,
+            "instance": 0,
+            "position": {
+              "x": 17.3,
+              "y": 40.1,
+              "z": 118.9
+            },
+            "mapCoordinates": {
+              "x": 9.4,
+              "y": 11.8
+            },
+            "weather": {
+              "id": 2,
+              "name": "Fair Skies"
+            },
+            "inSanctuary": true,
+            "canFly": false,
+            "nearestAetheryte": {
+              "id": 8,
+              "name": "Limsa Lominsa",
+              "isAethernetShard": false,
+              "unlocked": true,
+              "mapCoordinates": {
+                "x": 9.5,
+                "y": 11.4
+              },
+              "mapDistance": 0.41
+            },
+            "nearestAethernetShard": {
+              "id": 41,
+              "name": "The Aftcastle",
+              "isAethernetShard": true,
+              "unlocked": true,
+              "mapCoordinates": {
+                "x": 9.3,
+                "y": 12.0
+              },
+              "mapDistance": 0.22
+            }
+          }
+        },
+        {
+          "name": "get_weather_forecast",
+          "arguments": "{}",
+          "result": {
+            "territoryId": 129,
+            "territoryName": "Limsa Lominsa Lower Decks",
+            "weatherRateId": 14,
+            "currentWeatherInGame": {
+              "id": 2,
+              "name": "Fair Skies"
+            },
+            "possibleWeather": [
+              {
+                "id": 1,
+                "name": "Clear Skies",
+                "chancePercent": 20
+              },
+              {
+                "id": 2,
+                "name": "Fair Skies",
+                "chancePercent": 40
+              },
+              {
+                "id": 3,
+                "name": "Clouds",
+                "chancePercent": 20
+              },
+              {
+                "id": 7,
+                "name": "Rain",
+                "chancePercent": 20
+              }
+            ],
+            "forecast": [
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T12:00:00Z",
+                "endUtc": "2026-01-01T12:23:20Z",
+                "eorzeaStart": "08:00",
+                "secondsUntilStart": -300,
+                "isCurrent": true
+              },
+              {
+                "weatherId": 3,
+                "name": "Clouds",
+                "startUtc": "2026-01-01T12:23:20Z",
+                "endUtc": "2026-01-01T12:46:40Z",
+                "eorzeaStart": "16:00",
+                "secondsUntilStart": 1100,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 1,
+                "name": "Clear Skies",
+                "startUtc": "2026-01-01T12:46:40Z",
+                "endUtc": "2026-01-01T13:10:00Z",
+                "eorzeaStart": "00:00",
+                "secondsUntilStart": 2500,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 7,
+                "name": "Rain",
+                "startUtc": "2026-01-01T13:10:00Z",
+                "endUtc": "2026-01-01T13:33:20Z",
+                "eorzeaStart": "08:00",
+                "secondsUntilStart": 3900,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T13:33:20Z",
+                "endUtc": "2026-01-01T13:56:40Z",
+                "eorzeaStart": "16:00",
+                "secondsUntilStart": 5300,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T13:56:40Z",
+                "endUtc": "2026-01-01T14:20:00Z",
+                "eorzeaStart": "00:00",
+                "secondsUntilStart": 6700,
+                "isCurrent": false
+              }
+            ],
+            "note": "Mock data."
+          }
+        },
+        {
+          "name": "post_status",
+          "arguments": "{\"agent\":\"almanac\",\"status\":\"Limsa Lominsa Lower Decks\"}",
+          "result": {
+            "agent": "almanac-bench",
+            "state": "done",
+            "updated": true
+          }
+        }
+      ],
+      "final_answer": "You are in Limsa Lominsa Lower Decks; clouds next. Posted.",
+      "expected": {
+        "tool_score": 0.666667,
+        "answer_score": 1,
+        "score": 0.833333,
+        "success": false,
+        "error": null,
+        "valid_calls": 3,
+        "total_calls": 3
+      }
+    },
+    {
+      "name": "no_final_answer",
+      "note": "max_steps reached without a final answer: answer score 0.",
+      "task": "multi_step_status",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "get_location",
+          "arguments": "{}",
+          "result": {
+            "territory": {
+              "id": 129,
+              "name": "Limsa Lominsa Lower Decks",
+              "region": "La Noscea",
+              "zone": "Limsa Lominsa",
+              "intendedUse": "Town",
+              "isPvp": false,
+              "mountsAllowed": false
+            },
+            "map": {
+              "id": 12,
+              "name": "Limsa Lominsa Lower Decks"
+            },
+            "area": "The Aftcastle",
+            "subArea": null,
+            "instance": 0,
+            "position": {
+              "x": 17.3,
+              "y": 40.1,
+              "z": 118.9
+            },
+            "mapCoordinates": {
+              "x": 9.4,
+              "y": 11.8
+            },
+            "weather": {
+              "id": 2,
+              "name": "Fair Skies"
+            },
+            "inSanctuary": true,
+            "canFly": false,
+            "nearestAetheryte": {
+              "id": 8,
+              "name": "Limsa Lominsa",
+              "isAethernetShard": false,
+              "unlocked": true,
+              "mapCoordinates": {
+                "x": 9.5,
+                "y": 11.4
+              },
+              "mapDistance": 0.41
+            },
+            "nearestAethernetShard": {
+              "id": 41,
+              "name": "The Aftcastle",
+              "isAethernetShard": true,
+              "unlocked": true,
+              "mapCoordinates": {
+                "x": 9.3,
+                "y": 12.0
+              },
+              "mapDistance": 0.22
+            }
+          }
+        },
+        {
+          "name": "get_weather_forecast",
+          "arguments": "{}",
+          "result": {
+            "territoryId": 129,
+            "territoryName": "Limsa Lominsa Lower Decks",
+            "weatherRateId": 14,
+            "currentWeatherInGame": {
+              "id": 2,
+              "name": "Fair Skies"
+            },
+            "possibleWeather": [
+              {
+                "id": 1,
+                "name": "Clear Skies",
+                "chancePercent": 20
+              },
+              {
+                "id": 2,
+                "name": "Fair Skies",
+                "chancePercent": 40
+              },
+              {
+                "id": 3,
+                "name": "Clouds",
+                "chancePercent": 20
+              },
+              {
+                "id": 7,
+                "name": "Rain",
+                "chancePercent": 20
+              }
+            ],
+            "forecast": [
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T12:00:00Z",
+                "endUtc": "2026-01-01T12:23:20Z",
+                "eorzeaStart": "08:00",
+                "secondsUntilStart": -300,
+                "isCurrent": true
+              },
+              {
+                "weatherId": 3,
+                "name": "Clouds",
+                "startUtc": "2026-01-01T12:23:20Z",
+                "endUtc": "2026-01-01T12:46:40Z",
+                "eorzeaStart": "16:00",
+                "secondsUntilStart": 1100,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 1,
+                "name": "Clear Skies",
+                "startUtc": "2026-01-01T12:46:40Z",
+                "endUtc": "2026-01-01T13:10:00Z",
+                "eorzeaStart": "00:00",
+                "secondsUntilStart": 2500,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 7,
+                "name": "Rain",
+                "startUtc": "2026-01-01T13:10:00Z",
+                "endUtc": "2026-01-01T13:33:20Z",
+                "eorzeaStart": "08:00",
+                "secondsUntilStart": 3900,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T13:33:20Z",
+                "endUtc": "2026-01-01T13:56:40Z",
+                "eorzeaStart": "16:00",
+                "secondsUntilStart": 5300,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T13:56:40Z",
+                "endUtc": "2026-01-01T14:20:00Z",
+                "eorzeaStart": "00:00",
+                "secondsUntilStart": 6700,
+                "isCurrent": false
+              }
+            ],
+            "note": "Mock data."
+          }
+        },
+        {
+          "name": "post_status",
+          "arguments": "{\"agent\":\"almanac-bench\",\"status\":\"done\"}",
+          "result": {
+            "agent": "almanac-bench",
+            "state": "done",
+            "updated": true
+          }
+        }
+      ],
+      "final_answer": null,
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 0,
+        "score": 0.5,
+        "success": false,
+        "error": "no_answer",
+        "valid_calls": 3,
+        "total_calls": 3
+      }
+    },
+    {
+      "name": "expected_call_missing",
+      "note": "No call: tool score 0/1 (no validity factor without calls); contains_from_tool fails because the tool was never called.",
+      "task": "nearest_aetheryte",
+      "mode": "mock",
+      "calls": [],
+      "final_answer": "Limsa Lominsa",
+      "expected": {
+        "tool_score": 0,
+        "answer_score": 0,
+        "score": 0,
+        "success": false,
+        "error": "wrong_answer",
+        "valid_calls": 0,
+        "total_calls": 0
+      }
+    },
+    {
+      "name": "fallback_fixture_index_path",
+      "note": "Fixture list falls through to when {}; forecast[1].name = Clouds.",
+      "task": "weather_next_here",
+      "mode": "mock",
+      "calls": [
+        {
+          "name": "get_weather_forecast",
+          "arguments": "{\"count\":3}",
+          "result": {
+            "territoryId": 129,
+            "territoryName": "Limsa Lominsa Lower Decks",
+            "weatherRateId": 14,
+            "currentWeatherInGame": {
+              "id": 2,
+              "name": "Fair Skies"
+            },
+            "possibleWeather": [
+              {
+                "id": 1,
+                "name": "Clear Skies",
+                "chancePercent": 20
+              },
+              {
+                "id": 2,
+                "name": "Fair Skies",
+                "chancePercent": 40
+              },
+              {
+                "id": 3,
+                "name": "Clouds",
+                "chancePercent": 20
+              },
+              {
+                "id": 7,
+                "name": "Rain",
+                "chancePercent": 20
+              }
+            ],
+            "forecast": [
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T12:00:00Z",
+                "endUtc": "2026-01-01T12:23:20Z",
+                "eorzeaStart": "08:00",
+                "secondsUntilStart": -300,
+                "isCurrent": true
+              },
+              {
+                "weatherId": 3,
+                "name": "Clouds",
+                "startUtc": "2026-01-01T12:23:20Z",
+                "endUtc": "2026-01-01T12:46:40Z",
+                "eorzeaStart": "16:00",
+                "secondsUntilStart": 1100,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 1,
+                "name": "Clear Skies",
+                "startUtc": "2026-01-01T12:46:40Z",
+                "endUtc": "2026-01-01T13:10:00Z",
+                "eorzeaStart": "00:00",
+                "secondsUntilStart": 2500,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 7,
+                "name": "Rain",
+                "startUtc": "2026-01-01T13:10:00Z",
+                "endUtc": "2026-01-01T13:33:20Z",
+                "eorzeaStart": "08:00",
+                "secondsUntilStart": 3900,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T13:33:20Z",
+                "endUtc": "2026-01-01T13:56:40Z",
+                "eorzeaStart": "16:00",
+                "secondsUntilStart": 5300,
+                "isCurrent": false
+              },
+              {
+                "weatherId": 2,
+                "name": "Fair Skies",
+                "startUtc": "2026-01-01T13:56:40Z",
+                "endUtc": "2026-01-01T14:20:00Z",
+                "eorzeaStart": "00:00",
+                "secondsUntilStart": 6700,
+                "isCurrent": false
+              }
+            ],
+            "note": "Mock data."
+          }
+        }
+      ],
+      "final_answer": "Next window: Clouds.",
+      "expected": {
+        "tool_score": 1,
+        "answer_score": 1,
+        "score": 1,
+        "success": true,
+        "error": null,
+        "valid_calls": 1,
+        "total_calls": 1
+      }
+    }
+  ]
+}
