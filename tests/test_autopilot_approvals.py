@@ -351,3 +351,17 @@ def test_approval_rows_survive_and_are_queryable(tmp_path: Path) -> None:
     back.approve(first.ticket, "owner")
     assert back.get(first.ticket).approved and back.pending() == []
     assert back.request("code", 1, 3, "Edit demo a third time", "", "code:1").approved
+
+
+def test_stop_is_noticed_between_ticks_not_after_the_whole_idle_period(tmp_path: Path) -> None:
+    """`stop --now` should take seconds: the wait between ticks is sliced."""
+    pilot, proc, game, clock, _ = pilot_with_plan(tmp_path, idle_seconds=120, tick_seconds=120)
+    slept: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        if len(slept) == 1:  # the owner hits the kill switch while the loop idles
+            pilot.s.kill_switch.write_text("stopped\n")
+
+    assert pilot.run_forever(sleep=sleep) == 0
+    assert slept == [5.0], "it stopped after one 5-second slice, not after 120 seconds"
