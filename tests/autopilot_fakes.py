@@ -131,6 +131,8 @@ class FakeProc:
         abort: Callable[[], str] | None = None,
     ) -> ProcResult:
         self.calls.append({"argv": list(argv), "cwd": cwd, "env": dict(env), "stdin": stdin, "timeout": timeout})
+        if argv[0] == "bwrap":  # the sandbox wrapper: dispatch on the command it wraps
+            argv = argv[argv.index("--") + 1:]
         joined = " ".join(argv)
         if argv[0] == "git":
             if "worktree" in argv and "add" in argv:

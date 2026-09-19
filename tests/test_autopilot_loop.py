@@ -151,6 +151,25 @@ def test_rate_limit_switches_to_a_local_coder_and_labels_the_pr(tmp_path: Path) 
     assert len([c for c in proc.calls if c["argv"][0] == "claude"]) == 2
 
 
+def test_sandboxed_local_session_keeps_the_network_and_its_own_codex_home(tmp_path: Path) -> None:
+    # A repo may forbid the network for cloud sessions and tests; a local coding
+    # session still has to reach the model backend, and codex has to write its
+    # own CODEX_HOME.
+    pilot, proc, game, clock, _ = make_pilot(
+        tmp_path, caps={"coding_runs_per_day": 0}, sandbox={"mode": "bwrap"},
+        repos={"demo": {"path": str(tmp_path / "repo"), "github": "o/demo", "test": ["tests/run.sh"], "allow_network": False}},
+    )
+    tid, _ = app.add(pilot.store, "Fix it", "demo")
+    run_until(pilot, clock, _done(pilot, tid), step_seconds=60)
+    session = next(c["argv"] for c in proc.calls if "codex" in c["argv"])
+    assert session[0] == "bwrap" and "--unshare-net" not in session
+    binds = [session[i + 1] for i, a in enumerate(session) if a == "--bind"]
+    assert str(pilot.s.codex_home) in binds
+    # the repo's own test run still obeys the repo: no network
+    tests = next(c["argv"] for c in proc.calls if "tests/run.sh" in c["argv"])
+    assert tests[0] == "bwrap" and "--unshare-net" in tests
+
+
 def test_daily_cap_uses_local_coder_with_smaller_split_steps(tmp_path: Path) -> None:
     split = FakeModel([json.dumps({"subtasks": ["add the parser", "wire it in"]})],
                       default=json.dumps({"verdict": "approve", "summary": "ok", "comments": [], "tests_to_add": []}))
