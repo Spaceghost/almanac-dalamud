@@ -16,11 +16,19 @@ It was written for a desk of Linux machines with a gaming PC among them, so
 inference loads on demand, unloads when idle, stays on the GPU you pick, and
 stays off when memory is tight. It includes a first-class FFXIV/Dalamud
 integration: Dalamud log tools, plugin dev build/install tools, and the
-[XivMcp](#ffxiv-and-dalamud) in-game MCP server as a companion, with progress
+[XivMcp](#ffxiv-and-dalamud-engine) in-game MCP server as a companion, with progress
 shown on the in-game agent board.
 
 Nothing here is a pile of opaque scripts: knowledge is Markdown, tools are one
 TOML file each, and every change-making call is confirmed and audited.
+
+**FFXIV players:** you do not need any of the Python below. The
+[**Almanac** Dalamud plugin](#almanac-in-game-the-dalamud-plugin) in
+[`dalamud/`](dalamud/) connects a model running on your own PC (Ollama, LM
+Studio, llama.cpp or any OpenAI-compatible server) to the game through the
+XivMcp plugin, recommends models for your GPU, and runs a
+[community benchmark](#community-benchmark) so players can work out together
+which local models are worth their VRAM.
 
 By Johnneylee Jack Rollins ([github.com/Spaceghost](https://github.com/Spaceghost)). MIT licensed.
 
@@ -320,7 +328,89 @@ logged once to the gateway's journal. The current state is in the gateway's
 the local agent) returns the state the gateway last published to
 `<state_dir>/residency.json`.
 
-## FFXIV and Dalamud
+## Almanac in game: the Dalamud plugin
+
+`dalamud/` is a self-contained C# plugin (Windows, and Linux through
+XIVLauncher.Core/Wine). It needs no Python and no almanac engine.
+
+- **Setup wizard** (`/almanac setup`, opens on first load): finds model
+  servers on their usual local ports (Ollama 11434, LM Studio 1234, llama.cpp
+  8080, KoboldCpp 5001, vLLM 8000) or any URL you give it; reads your GPU and
+  its VRAM through DXGI; subtracts what the game needs when both share the
+  GPU; and recommends models for that budget from the
+  [leaderboard](https://spacegho.st/mods/ffxiv/almanac/)'s
+  `recommendations.json`, falling back to a
+  [bundled list](benchmark/recommendations.json) offline. Every model shows
+  whether it calls tools natively, through a prompted fallback, or is
+  unknown until you press **Test tool calling**.
+- **Chat** (`/almanac`, or `/almanac <question>`): threads kept in SQLite,
+  follow-ups, branching a thread from any message, streaming replies, and
+  the agent loop running in the plugin against your model with XivMcp's tools
+  (a small, standard or full tool set). Anything that changes your game still
+  goes through XivMcp's in-game approval.
+- **Benchmark** (`/almanac bench`): the [suite](#community-benchmark) against
+  your model, with mock game data or live through XivMcp; results stay in
+  SQLite and are shared only when you press **Share** and confirm the exact
+  JSON.
+- **Almanac engine** (power users): point the plugin at an almanac gateway
+  (`http://127.0.0.1:41881/v1` and its token) to get the engine's model
+  residency and memory guard while keeping the in-game chat.
+- **XivMcp link:** XivMcp's `feature/local-model` build hands Almanac its own
+  named client token over Dalamud IPC, so nothing is copied by hand, and its
+  new *Local model* setting is picked up when Almanac has no model of its own.
+  With an older XivMcp, create a client token in XivMcp and enter it under
+  Almanac → Settings → XivMcp.
+- **IPC for other plugins:** `Almanac.Ask` (`Func<string, bool>`) opens the
+  chat and sends a question; `Almanac.ApiVersion` (`Func<int>`).
+- **Extension point:** tools reach the agent through `IToolSource`
+  (`dalamud/src/Almanac.Core/Tools/ToolSources.cs`). XivMcp and the
+  benchmark's mock tools implement it today; sandboxed WebAssembly tools are
+  meant to plug in as another source.
+
+### Install (from source, until it is in a plugin repository)
+
+1. Install the .NET 10 SDK, then build:
+   `dotnet build dalamud/Almanac.Dalamud.slnx -c Release`. The plugin lands in
+   `../almanac-dalamud-build/artifacts/bin/Almanac.Plugin/release/Almanac.dll`
+   (outside the checkout; set `ALMANAC_ARTIFACTS` to change it).
+2. In game: `/xlsettings` → **Experimental** → **Dev Plugin Locations** → add
+   the full path of `Almanac.dll` (under Wine, `Z:\path\to\Almanac.dll`) →
+   **Save and Close**.
+3. `/xlplugins` → **Dev Tools** → **Installed Dev Plugins** → enable
+   **Almanac**. The setup wizard opens.
+4. Wizard: **1** pick the detected server (or type a URL) → **Next**; **2**
+   check the GPU, tick *The game runs on this GPU too* if it does, copy a
+   recommended model's `ollama pull` command and run it in a terminal →
+   **Next**; **3** pick the model, press **Test tool calling** → **Next**;
+   **4** keep *Connect automatically through XivMcp*, press **Test the
+   connection** → **Finish and open the chat**.
+
+Development: `dotnet test dalamud/tests/Almanac.Core.Tests` runs the non-UI
+logic (model client, MCP client, agent loop, scorer against the shared
+vectors, setup detection, SQLite store) with no game and no network.
+
+## Community benchmark
+
+[`benchmark/`](benchmark/) holds a fixed, versioned suite of FFXIV tasks
+(`ffxiv-core` 1.0.0: location, weather, aetherytes, map flag, quest lookup,
+slash-command formatting, restraint and a multi-step task), the exact
+[scoring rules](benchmark/README.md), and the JSON schemas of a result and of
+the recommendations. Both clients implement the same rules and are tested
+against the same [scoring vectors](benchmark/testdata/scoring-vectors.json):
+
+- in game: **Almanac → Benchmark**;
+- headless: `almanac bench --model qwen3:8b` (mock tools, no game needed), or
+  `almanac bench --live --model qwen3:8b` against XivMcp; `--submit` shows the
+  JSON and asks before sending it.
+
+A result scores tool-call success and validity, answer quality (exact match
+and rubric checks), tokens per second, time to first token and peak VRAM.
+Submissions are anonymous: GPU model, VRAM, rounded RAM, OS family, backend,
+model, quantisation, context and scores; no names, paths or addresses. The
+leaderboard at <https://spacegho.st/mods/ffxiv/almanac/> turns them into
+per-VRAM-tier recommendations.
+
+## FFXIV and Dalamud (engine)
 
 - Tools: `dalamud_log_tail`, `dalamud_log_grep` (XIVLauncher.Core logs under
   `~/.xlcore/logs`), `dalamud_plugin_build`, `dalamud_plugin_install_dev`
@@ -353,9 +443,20 @@ examples/         knowledge/ and tools/ to copy from
 deploy/           install.sh, systemd user units, Quadlet, Incus profile
 docs/TOOLS.md     tool file reference
 tests/            pytest, no network
+dalamud/          the Almanac Dalamud plugin (C#): Almanac.Core (no game), Almanac.Plugin, tests
+benchmark/        suite, scoring rules, schemas, bundled recommendations, scoring vectors
 ```
 
 Development: `python3 -m venv .venv && .venv/bin/pip install -e '.[test]' && .venv/bin/pytest`.
+
+## Roadmap
+
+- `feature/autopilot`: an overnight loop that plans with the local model pool
+  and runs coding sessions in sandboxed worktrees (not merged yet).
+- WebAssembly tools: sandboxed tool modules behind the plugin's
+  `IToolSource` and the engine's tool runner.
+- A plugin repository entry so players can install Almanac without building
+  it.
 
 ## Untested
 
@@ -366,3 +467,9 @@ Development: `python3 -m venv .venv && .venv/bin/pip install -e '.[test]' && .ve
 - `deploy/quadlet` and `deploy/incus` on real hardware.
 - Embeddings (`[kb] embed_model`) against a real embedding model.
 - The screenshot helper on desktops other than GNOME.
+- The Almanac plugin in a running game: the windows, DXGI GPU detection
+  (Windows and Wine/DXVK), the SQLite native library inside Dalamud, the XivMcp
+  IPC connection and live benchmark mode. Its Core logic is unit-tested with
+  fakes; nothing has been run against a real model server or in game yet.
+- `almanac bench` against a real model server and live XivMcp.
+- The leaderboard API itself (`/mods/ffxiv/almanac/api/results`).
