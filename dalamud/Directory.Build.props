@@ -1,0 +1,16 @@
+<Project>
+  <!--
+    Build outputs live outside the source tree: ../../almanac-dalamud-build next to the checkout by default.
+    Set ALMANAC_ARTIFACTS to put them somewhere else.
+  -->
+  <PropertyGroup>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath Condition="'$(ALMANAC_ARTIFACTS)' != ''">$(ALMANAC_ARTIFACTS)</ArtifactsPath>
+    <ArtifactsPath Condition="'$(ArtifactsPath)' == ''">$(MSBuildThisFileDirectory)../../almanac-dalamud-build/artifacts</ArtifactsPath>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+</Project>

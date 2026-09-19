@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-19T00:00:00Z",
+  "suite_version": "1.0.0",
+  "source": "bundled",
+  "note": "Bundled starting points, not benchmark results: VRAM figures are typical Q4_K_M sizes at 8k context. The leaderboard replaces this list once players submit results.",
+  "tiers": [
+    { "id": "tiny", "label": "Under 4 GB free for the model", "min_vram_mb": 0, "max_vram_mb": 4096, "models": [
+      { "name": "Qwen3 1.7B", "ollama": "qwen3:1.7b", "lmstudio": null, "quant": "Q4_K_M", "context": 8192, "vram_mb": 2048, "tool_calling": "native", "score": null, "tokens_per_s": null, "samples": 0, "notes": "Fast and small; expect mistakes on multi-step tasks." },
+      { "name": "Llama 3.2 3B", "ollama": "llama3.2:3b", "lmstudio": null, "quant": "Q4_K_M", "context": 8192, "vram_mb": 3072, "tool_calling": "native", "score": null, "tokens_per_s": null, "samples": 0, "notes": "" }
+    ] },
+    { "id": "small", "label": "4-7 GB free for the model", "min_vram_mb": 4096, "max_vram_mb": 7168, "models": [
+      { "name": "Qwen3 4B", "ollama": "qwen3:4b", "lmstudio": "qwen/qwen3-4b", "quant": "Q4_K_M", "context": 8192, "vram_mb": 3700, "tool_calling": "native", "score": null, "tokens_per_s": null, "samples": 0, "notes": "Best small tool caller to start with." },
+      { "name": "Llama 3.2 3B", "ollama": "llama3.2:3b", "lmstudio": null, "quant": "Q4_K_M", "context": 8192, "vram_mb": 3072, "tool_calling": "native", "score": null, "tokens_per_s": null, "samples": 0, "notes": "" }
+    ] },
+    { "id": "mid", "label": "7-11 GB free for the model", "min_vram_mb": 7168, "max_vram_mb": 11264, "models": [
+      { "name": "Qwen3.5 9B", "ollama": "qwen3.5:9b", "lmstudio": null, "quant": "Q4_K_M", "context": 16384, "vram_mb": 6400, "tool_calling": "native", "score": null, "tokens_per_s": null, "samples": 0, "notes": "The almanac engine's default model." },
+      { "name": "Qwen3 8B", "ollama": "qwen3:8b", "lmstudio": "qwen/qwen3-8b", "quant": "Q4_K_M", "context": 8192, "vram_mb": 6200, "tool_calling": "native", "score": null, "tokens_per_s": null, "samples": 0, "notes": "" },
+      { "name": "Llama 3.1 8B", "ollama": "llama3.1:8b", "lmstudio": null, "quant": "Q4_K_M", "context": 8192, "vram_mb": 6000, "tool_calling": "native", "score": null, "tokens_per_s": null, "samples": 0, "notes": "" }
+    ] },
+    { "id": "upper", "label": "11-16 GB free for the model", "min_vram_mb": 11264, "max_vram_mb": 16384, "models": [
+      { "name": "Qwen3 14B", "ollama": "qwen3:14b", "lmstudio": "qwen/qwen3-14b", "quant": "Q4_K_M", "context": 8192, "vram_mb": 10500, "tool_calling": "native", "score": null, "tokens_per_s": null, "samples": 0, "notes": "" },
+      { "name": "gpt-oss 20B", "ollama": "gpt-oss:20b", "lmstudio": "openai/gpt-oss-20b", "quant": "MXFP4", "context": 8192, "vram_mb": 14000, "tool_calling": "native", "score": null, "tokens_per_s": null, "samples": 0, "notes": "Needs about 14 GB." },
+      { "name": "Qwen3.5 9B", "ollama": "qwen3.5:9b", "lmstudio": null, "quant": "Q4_K_M", "context": 32768, "vram_mb": 7000, "tool_calling": "native", "score": null, "tokens_per_s": null, "samples": 0, "notes": "Room for a long context." }
+    ] },
+    { "id": "large", "label": "16-24 GB free for the model", "min_vram_mb": 16384, "max_vram_mb": 24576, "models": [
+      { "name": "Qwen3 30B-A3B", "ollama": "qwen3:30b", "lmstudio": "qwen/qwen3-30b-a3b", "quant": "Q4_K_M", "context": 8192, "vram_mb": 19500, "tool_calling": "native", "score": null, "tokens_per_s": null, "samples": 0, "notes": "Mixture of experts: fast for its size." },
+      { "name": "Mistral Small 3.2 24B", "ollama": "mistral-small3.2:24b", "lmstudio": "mistralai/mistral-small-3.2", "quant": "Q4_K_M", "context": 8192, "vram_mb": 16000, "tool_calling": "native", "score": null, "tokens_per_s": null, "samples": 0, "notes": "" },
+      { "name": "gpt-oss 20B", "ollama": "gpt-oss:20b", "lmstudio": "openai/gpt-oss-20b", "quant": "MXFP4", "context": 16384, "vram_mb": 14500, "tool_calling": "native", "score": null, "tokens_per_s": null, "samples": 0, "notes": "" }
+    ] },
+    { "id": "xl", "label": "24 GB or more free for the model", "min_vram_mb": 24576, "max_vram_mb": null, "models": [
+      { "name": "Qwen3 32B", "ollama": "qwen3:32b", "lmstudio": "qwen/qwen3-32b", "quant": "Q4_K_M", "context": 8192, "vram_mb": 22000, "tool_calling": "native", "score": null, "tokens_per_s": null, "samples": 0, "notes": "" },
+      { "name": "Qwen3 30B-A3B", "ollama": "qwen3:30b", "lmstudio": "qwen/qwen3-30b-a3b", "quant": "Q4_K_M", "context": 16384, "vram_mb": 20500, "tool_calling": "native", "score": null, "tokens_per_s": null, "samples": 0, "notes": "" },
+      { "name": "Mistral Small 3.2 24B", "ollama": "mistral-small3.2:24b", "lmstudio": "mistralai/mistral-small-3.2", "quant": "Q4_K_M", "context": 16384, "vram_mb": 17000, "tool_calling": "native", "score": null, "tokens_per_s": null, "samples": 0, "notes": "" }
+    ] }
+  ]
+}
