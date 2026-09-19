@@ -1,0 +1,108 @@
+# On a v* tag: build the Dalamud plugin on a GitHub-hosted runner, package it, and
+# publish it as a GitHub Release whose asset URLs the plugin repository listing points at.
+#
+#   v0.1.0          a stable release. .../releases/latest/download/latest.zip and
+#                   pluginmaster.json are the URLs spacegho.st/mods/ffxiv/plugins.json
+#                   serves; both keep working across releases because the names never change.
+#   v0.1.1-test.1   a test build. Published as a prerelease under its own tag, and copied
+#                   onto the floating `testing` release, so
+#                   .../releases/download/testing/latest.zip is always the newest test
+#                   build. Players opt in per plugin with the installer's testing
+#                   checkbox; nobody on the stable channel sees it.
+#
+# Nothing here runs on a machine of the author's, and nothing here needs the game or a
+# Dalamud install: the reference assemblies come from goatcorp's public distribution.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      DALAMUD_HOME: ${{ github.workspace }}/.dalamud
+      OUT: ${{ github.workspace }}/release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Check the manifest against the tag
+        run: dalamud/tools/check-manifest.py --tag "$GITHUB_REF_NAME"
+
+      - name: Fetch the Dalamud reference assemblies
+        run: dalamud/tools/fetch-dalamud.sh
+
+      - name: Test
+        run: dotnet test dalamud/tests/Almanac.Core.Tests -c Release
+
+      - name: Build
+        run: dotnet build dalamud/src/Almanac.Plugin/Almanac.Plugin.csproj -c Release
+
+      - name: Package
+        env:
+          # a tag with a pre-release part (v0.1.1-test.1) is a testing build
+          TESTING: ${{ contains(github.ref_name, '-') && '1' || '0' }}
+        run: dalamud/tools/package.sh
+
+      - name: Publish the release for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          pre=()
+          [[ "$TAG" == *-* ]] && pre=(--prerelease)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$OUT"/* --clobber
+          else
+            gh release create "$TAG" "$OUT"/* --verify-tag --title "Almanac $TAG" \
+              --generate-notes "${pre[@]}"
+          fi
+
+      # The testing channel is one floating prerelease called `testing`, so the repository
+      # listing can name a download URL that never changes. A stable tag leaves it alone.
+      - name: Move the testing channel onto this build
+        if: contains(github.ref_name, '-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          notes="Rolling testing channel: the newest test build (currently $TAG).
+
+          Opt in per plugin in /xlplugins -> the plugin's entry -> testing, after adding
+          https://spacegho.st/mods/ffxiv/plugins.json as a custom plugin repository."
+          if gh release view testing >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/testing" -f sha="$SHA" -F force=true
+            gh release edit testing --prerelease --notes "$notes"
+            gh release upload testing "$OUT"/* --clobber
+          else
+            gh release create testing "$OUT"/* --target "$SHA" --prerelease \
+              --title "Testing channel" --notes "$notes"
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: almanac-plugin-${{ github.ref_name }}
+          path: ${{ github.workspace }}/release
+          if-no-files-found: error
+          retention-days: 30

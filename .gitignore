@@ -5,3 +5,5 @@ __pycache__/
 build/
 knowledge/.index.sqlite*
 *.token
+.claude/
+.dalamud/
