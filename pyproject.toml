@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "almanac"
+version = "0.1.0"
+description = "Headless local AI tool runner: Markdown knowledge base, declared tools, MCP server, local model gateway."
+requires-python = ">=3.11"
+# Pinned: these are the only runtime dependencies. mcp brings starlette,
+# uvicorn, httpx, anyio and pydantic, which the gateway reuses.
+dependencies = [
+  "mcp==1.30.0",
+  "starlette==1.6.0",
+  "uvicorn==0.53.0",
+  "httpx==0.28.1",
+  "jeepney==0.9.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest==9.1.1"]
+
+[project.scripts]
+almanac = "almanac.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
