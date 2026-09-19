@@ -62,9 +62,13 @@ mkdir -p "$STAGE/Almanac" "$OUT"
 # other runtimes/ are for platforms the game does not run on (they were 45 MB of the
 # first zip), and DalamudPackager leaves its own zip in the output folder.
 ( cd "$BIN" && find . -type f -print0 | while IFS= read -r -d '' f; do
+    # A case pattern's * matches slashes too, so the narrow paths come first.
     case "$f" in
+      ./runtimes/win-x64/native/*) ;;                                  # the native SQLite the game loads
+      ./runtimes/* | ./Almanac/*) continue ;;                          # other platforms; DalamudPackager's own staging copy
       ./*.deps.json | ./*.runtimeconfig.json | *.pdb | *.zip) continue ;;
-      ./*.dll | ./*.json | ./runtimes/win-x64/native/*) ;;
+      ./*/*) continue ;;                                               # nothing else from a subfolder
+      ./*.dll | ./*.json) ;;
       *) continue ;;
     esac
     mkdir -p "$STAGE/Almanac/$(dirname "$f")"
