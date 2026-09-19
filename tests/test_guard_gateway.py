@@ -76,3 +76,30 @@ async def _tight(config) -> None:
     async with client:
         r = await client.post("/v1/messages", json={"model": "claude-x"}, headers={"x-api-key": token})
         assert r.status_code == 200  # already resident: no new load
+
+
+def test_codex_namespace_roundtrip() -> None:
+    from almanac import codex_compat
+
+    body = {
+        "tools": [
+            {"type": "function", "name": "exec_command"},
+            {"type": "namespace", "name": "mcp__almanac", "tools": [{"type": "function", "name": "kb_search", "parameters": {}}]},
+        ],
+        "input": [{"type": "function_call", "namespace": "mcp__almanac", "name": "kb_search", "arguments": "{}"}],
+    }
+    mapping = codex_compat.flatten_request(body)
+    assert [t["name"] for t in body["tools"]] == ["exec_command", "mcp__almanac__kb_search"]
+    assert body["input"][0]["name"] == "mcp__almanac__kb_search" and "namespace" not in body["input"][0]
+    line = b'data: {"type":"response.output_item.done","item":{"type":"function_call","name":"mcp__almanac__kb_search"}}'
+    out = json.loads(codex_compat.restore_line(line, mapping)[6:])
+    assert out["item"] == {"type": "function_call", "name": "kb_search", "namespace": "mcp__almanac"}
+
+    async def chunks():
+        yield line[:30]
+        yield line[30:] + b"\n\ndata: [DONE]\n"
+
+    async def collect():
+        return b"".join([c async for c in codex_compat.restore_stream(chunks(), mapping)])
+
+    assert b'"namespace":"mcp__almanac"' in asyncio.run(collect())

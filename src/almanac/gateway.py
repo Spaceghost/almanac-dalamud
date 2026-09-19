@@ -11,10 +11,12 @@ Ollama lacks for this use:
 * the resource guard: refuse to *load* a model when memory is tight, and
   unload the resident model when memory runs low,
 * ``/v1/messages/count_tokens`` (Claude Code calls it; Ollama has none) as a
-  character-based estimate.
+  character-based estimate,
+* for ``/v1/responses``: Codex's tool namespaces flattened for Ollama and
+  restored in the reply (see codex_compat.py).
 
-Request and response bodies are streamed through unchanged apart from the
-``model`` field of the request.
+Otherwise request and response bodies are streamed through unchanged apart
+from the ``model`` field of the request.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+from . import codex_compat
 from .config import Config
 from .guard import Guard
 
@@ -99,10 +102,11 @@ class Gateway:
     async def models(self, request: Request) -> Response:
         if not self.authorized(request):
             return _error("openai", 401, "missing or wrong token")
-        names = sorted(set(self.settings.get("allowed_models", [])) | set(self.settings.get("models", {})))
-        return JSONResponse(
-            {"object": "list", "data": [{"id": n, "object": "model", "type": "model", "display_name": n, "owned_by": "almanac"} for n in names]}
-        )
+        names = sorted(set(self.settings.get("allowed_models", [])) | {m for m in self.settings.get("models", {}) if not any(c in m for c in "*?[")})
+        data = [{"id": n, "object": "model", "type": "model", "display_name": n, "owned_by": "almanac"} for n in names]
+        # "data": OpenAI/Anthropic list shape. "models": Codex's catalogue field;
+        # left empty so Codex falls back to its own/model_catalog_json metadata.
+        return JSONResponse({"object": "list", "data": data, "has_more": False, "models": []})
 
     async def count_tokens(self, request: Request) -> Response:
         if not self.authorized(request):
@@ -122,6 +126,7 @@ class Gateway:
         if target is None:
             return _error(api, 404, f"model {requested!r} is not mapped to an allowed local model")
         body["model"] = target
+        namespaces = codex_compat.flatten_request(body) if request.url.path == "/v1/responses" else {}
         verdict = await asyncio.to_thread(self.guard.may_load, target in await self.loaded_models())
         if not verdict.ok:
             log.warning("refused %s: %s", request.url.path, verdict.reason)
@@ -138,8 +143,15 @@ class Gateway:
 
         async def relay() -> AsyncIterator[bytes]:
             try:
-                async for chunk in response.aiter_bytes():
-                    yield chunk
+                if not namespaces:
+                    async for chunk in response.aiter_bytes():
+                        yield chunk
+                elif response.headers.get("content-type", "").startswith("text/event-stream"):
+                    async for chunk in codex_compat.restore_stream(response.aiter_bytes(), namespaces):
+                        yield chunk
+                else:
+                    data = json.loads(await response.aread())
+                    yield json.dumps(codex_compat.restore(data, namespaces)).encode()
             finally:
                 await response.aclose()
 
