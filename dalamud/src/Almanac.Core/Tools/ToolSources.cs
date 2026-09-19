@@ -33,7 +33,7 @@ public interface IToolSource
 }
 
 /// <summary>Tools of an MCP server (XivMcp). XivMcp enforces its permission tiers and in-game approvals server side.</summary>
-public sealed class McpToolSource(McpHttpClient client, string id = "xivmcp") : IToolSource
+public sealed class McpToolSource(McpHttpClient client, string id = "xivmcp") : IToolSource, IDisposable
 {
     private IReadOnlyList<ToolDef>? cached;
 
@@ -51,6 +51,8 @@ public sealed class McpToolSource(McpHttpClient client, string id = "xivmcp") : 
     }
 
     public void Invalidate() => cached = null;
+
+    public void Dispose() => Client.Dispose();
 
     public async Task<ToolOutcome> CallAsync(string name, JsonObject arguments, CancellationToken ct)
     {

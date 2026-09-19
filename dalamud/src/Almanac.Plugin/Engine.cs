@@ -69,6 +69,10 @@ public sealed class Engine(AlmanacStore store, XivMcpLink xivmcp, Func<AlmanacSe
 
     public string CapabilityKey(string model) => $"{ServerDetector.RootOf(ModelTarget().BaseUrl)}|{model}";
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Reliability",
+        "CA2000:Dispose objects before losing scope",
+        Justification = "The McpHttpClient is handed to the McpToolSource stored in the xivTools field; Invalidate() and Dispose() release it, which CA2213 checks.")]
     public async Task<McpToolSource?> XivMcpToolsAsync(bool forceNew = false)
     {
         if (xivTools != null && !forceNew)
@@ -81,6 +85,7 @@ public sealed class Engine(AlmanacStore store, XivMcpLink xivmcp, Func<AlmanacSe
             return null;
         }
 
+        xivTools?.Dispose();
         xivTools = new McpToolSource(new McpHttpClient(http, connection.Endpoint, connection.Token, XivMcpLink.ClientName, Version));
         try
         {
@@ -90,6 +95,7 @@ public sealed class Engine(AlmanacStore store, XivMcpLink xivmcp, Func<AlmanacSe
         catch (Exception ex) when (ex is McpException or HttpRequestException or TaskCanceledException)
         {
             XivMcpStatus = $"XivMcp: {ex.Message}";
+            xivTools.Dispose();
             xivTools = null;
             xivmcp.Forget();
         }
@@ -145,6 +151,8 @@ public sealed class Engine(AlmanacStore store, XivMcpLink xivmcp, Func<AlmanacSe
     /// <summary>Settings changed: rebuild clients on next use.</summary>
     public void Invalidate()
     {
+        // The old tool source owns an MCP client with a semaphore in it; dropping the reference would leak it.
+        xivTools?.Dispose();
         xivTools = null;
         xivModel = null;
         xivmcp.Forget();
@@ -152,7 +160,10 @@ public sealed class Engine(AlmanacStore store, XivMcpLink xivmcp, Func<AlmanacSe
 
     public void Dispose()
     {
-        Session?.Cancel();
+        Session?.Dispose();
+        Session = null;
+        xivTools?.Dispose();
+        xivTools = null;
         http.Dispose();
         quick.Dispose();
     }

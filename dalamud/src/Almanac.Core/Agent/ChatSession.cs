@@ -21,7 +21,7 @@ public sealed record ChatLine(LineKind Kind, string Text, int? Seq = null);
 /// running agent. The UI thread reads <see cref="Snapshot"/>; <see cref="SendAsync"/> runs on the thread pool and
 /// persists every message to SQLite as it happens, so a crash or reload loses at most the reply being streamed.
 /// </summary>
-public sealed class ChatSession(AlmanacStore store, Func<AgentLoop> newLoop, Func<string> systemPrompt)
+public sealed class ChatSession(AlmanacStore store, Func<AgentLoop> newLoop, Func<string> systemPrompt) : IDisposable
 {
     public const int HistoryWindow = 40;
 
@@ -86,6 +86,15 @@ public sealed class ChatSession(AlmanacStore store, Func<AgentLoop> newLoop, Fun
     }
 
     public void Cancel() => running?.Cancel();
+
+    /// <summary>Cancels an in-flight turn and releases its token source. Safe to call more than once.</summary>
+    public void Dispose()
+    {
+        var inFlight = running;
+        running = null;
+        inFlight?.Cancel();
+        inFlight?.Dispose();
+    }
 
     public async Task SendAsync(string text)
     {
