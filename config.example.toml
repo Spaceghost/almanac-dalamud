@@ -54,6 +54,7 @@ embed_model = ""                     # e.g. "embeddinggemma" once pulled; then `
 [agent]
 max_steps = 8
 reasoning_effort = "none"            # thinking off: much faster on small models
+context_tokens = 8192                # the model's context: thread history (ask --thread) is trimmed to fit
 
 # Companion MCP servers the local agent may use. Example: XivMcp in FFXIV.
 # [upstreams.xivmcp]

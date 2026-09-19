@@ -65,7 +65,9 @@ DEFAULTS: dict[str, Any] = {
         "model": "",  # empty = [gateway] default_model
     },
     "kb": {"embed_model": ""},
-    "agent": {"max_steps": 8, "model": "", "temperature": 0.2, "reasoning_effort": "none"},
+    "agent": {"max_steps": 8, "model": "", "temperature": 0.2, "reasoning_effort": "none",
+              # the model's context window in tokens: thread history is trimmed to fit
+              "context_tokens": 8192},
 }
 
 
