@@ -222,7 +222,7 @@ class Almanac:
                 self.audit("approved", name, args, caller, safety=safety, via="interactive" if approved else "token")
             return self._run(name, args, caller)
         except (ToolError, KnowledgeError, autopilot_tools.AutopilotToolError) as exc:
-            if name not in ("kb_search", "kb_read", "kb_list", "model_residency", "autopilot_status"):
+            if name not in ("kb_search", "kb_read", "kb_list", "model_residency", "autopilot_status", "autopilot_pending"):
                 self.audit("rejected", name, args, caller, error=str(exc))
             return Outcome(text=f"error: {exc}", is_error=True)
 
@@ -254,7 +254,7 @@ class Almanac:
             return Outcome(f"{'written' if result['written'] else 'unchanged'}: {result['path']}\n\n{result['diff']}")
         if name in autopilot_tools.TOOLS:
             text = autopilot_tools.run(name, args, self.config)
-            if name != "autopilot_status":
+            if name not in ("autopilot_status", "autopilot_pending"):
                 self.audit("ran", name, args, caller)
             return Outcome(text)
         tool = self.tools[name]

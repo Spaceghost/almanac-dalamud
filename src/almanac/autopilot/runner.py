@@ -5,12 +5,20 @@ Each tick:
 1. stop if the kill switch file exists or ``stop`` was requested;
 2. refresh the game link (the game may have started or closed);
 3. poll task sources (every ``source_interval_seconds``);
-4. check parked approval tickets: approved -> resume the plan after that step,
-   denied/expired/cancelled -> re-plan the rest of the task;
+4. check parked approval tickets - the owner's answers pile up in the queue
+   database and are picked up whenever they arrive: an approved game action
+   resumes the plan after that step, an approved code or push gate lets that
+   step run, and a denial stops the task (game denials re-plan the rest);
 5. write the morning digest once a day;
 6. collect finished steps, then (unless paused) start the next step of the
    highest-value runnable tasks, up to ``max_parallel`` at once. Each task has
    at most one step in flight.
+
+Approval: nothing leaves the sandbox unasked. A task's first coding session and
+every push/draft PR are gated by ``approvals.py``; game actions are gated by
+XivMcp's own tickets. A gated step parks, the loop keeps working on other tasks,
+and the step resumes where it stopped once the answer comes - after a restart
+too, because the queue and the pending approvals are in one SQLite file.
 
 Resources: a ``code`` step runs on the cloud (Claude Code / Codex) while the
 daily caps allow and the account is not limited, and otherwise on a local
@@ -36,6 +44,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from .approvals import DENIED, Approvals, is_local
 from .budget import Budget, backoff_seconds, next_local_midnight
 from .coder import (
     claude_argv, classify_limit, codex_argv, limit_backoff_seconds, local_coder_argv, local_coder_env, parse_claude,
@@ -43,11 +52,11 @@ from .coder import (
 )
 from .digest import write_digest
 from .game import Game, GameError
-from .git import GitError, GitOps, branch_for, slug
+from .git import GitError, GitOps, branch_for, files_changed, slug
 from .planner import Model, ModelUnavailable, Planner, review_diff, split_for_local
 from .pool import Backend, BackendModel, Lease, Pool
 from .sandbox import ProcResult, ProcRunner, Redactor, SecretError, bwrap_argv, child_env, resolve_secrets, sandbox_mode
-from .settings import Repo, Settings, expand
+from .settings import Repo, Settings, append_log, expand
 from .sources import ReadOnlyGh, collect
 from .store import Step, Store, Task
 
@@ -89,6 +98,17 @@ class InlineExecutor:
         return None
 
 
+def free_memory() -> int:
+    """MemAvailable in MB (how much can be handed out without swapping), 0 if unknown."""
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) // 1024
+    except (OSError, ValueError, IndexError):  # pragma: no cover - not Linux
+        return 0
+    return 0
+
+
 def author_label(author: str) -> str:
     return ("by:" + slug(author.replace("@", "-").replace(":", "-"), 45)).strip("-")
 
@@ -111,6 +131,7 @@ class Autopilot:
         which: Callable[[str], str | None] = shutil.which,
         executor: Any = None,
         backend_model: Callable[[Backend], Model] | None = None,
+        free_memory_mb: Callable[[], int] | None = None,
     ) -> None:
         self.s = settings
         self.store = store
@@ -129,6 +150,9 @@ class Autopilot:
         self.backend_model = backend_model or (lambda b: BackendModel(b))
         self.redact = Redactor()
         self.dry_run = bool(settings["dry_run"])
+        self.approvals = Approvals(store, settings.approval, clock, self.log)
+        self.free_memory_mb = free_memory_mb or free_memory
+
         self.budget = Budget(store, settings.caps, clock)
         self.git = GitOps(self._git_run, settings.worktrees_dir, settings.protected, self.dry_run, lambda m: self.log(None, "git", m), self._git_run_stdin)
         self.jobs: dict[int, Job] = {}
@@ -137,7 +161,9 @@ class Autopilot:
 
     # -- plumbing ------------------------------------------------------------
     def log(self, task_id: int | None, kind: str, message: str) -> None:
-        self.store.log(task_id, kind, self.redact(message))
+        clean = self.redact(message)
+        self.store.log(task_id, kind, clean)
+        append_log(self.s.log_file, task_id, kind, clean)
 
     def audit(self, event: str, name: str, args: dict[str, Any], **extra: Any) -> None:
         clean = {k: self.redact(str(v)) if isinstance(v, str) else v for k, v in args.items()}
@@ -233,6 +259,9 @@ class Autopilot:
     # -- tickets -------------------------------------------------------------
     def poll_tickets(self) -> None:
         for step in self.store.waiting_steps():
+            if is_local(step.ticket_id):
+                self.poll_gate(step)
+                continue
             try:
                 ticket = self.game.get_ticket(step.ticket_id)
             except GameError as exc:
@@ -256,6 +285,28 @@ class Autopilot:
                 self.log(task.id, "plan", f"re-planned after {ticket.state} ({how})")
             if not self.store.get(task.id).blockers and task.state == "waiting":
                 self.store.set_state(task.id, "ready", f"ticket {ticket.id} {ticket.state}")
+
+    def poll_gate(self, step: Step) -> None:
+        """A code/push approval came back: let the step run, or hand the task over."""
+        try:
+            approval = self.approvals.get(step.ticket_id)
+        except KeyError:
+            self.log(step.task_id, "approval", f"approval {step.ticket_id} is gone; the step waits for the owner")
+            self.store.set_state(step.task_id, "needs_owner", f"approval {step.ticket_id} missing from the queue")
+            return
+        if not approval.settled:
+            return
+        task = self.store.get(step.task_id)
+        self.audit("approval_resolved", approval.kind, {"task": task.id, "ticket": approval.ticket}, state=approval.state)
+        if approval.approved:
+            # back to pending, not done: approval unblocks the step, it does not replace it
+            self.store.update_step(step.id, state="pending", ticket_id="", result=f"{approval.ticket} approved by {approval.actor}")
+            self.store.set_state(task.id, "ready", f"{approval.ticket} approved; resuming step {step.idx + 1}", next_at=0)
+            self.log(task.id, "approval", f"{approval.ticket} approved by {approval.actor}; resuming {step.kind} step {step.idx + 1}")
+        else:
+            self.store.update_step(step.id, state="skipped", ticket_id="", result=f"{approval.ticket} denied: {approval.result}")
+            self.store.set_state(task.id, "needs_owner", f"you denied {approval.kind}: {approval.title[:200]}")
+            self.game.post_status(f"#{task.id} stopped: you denied {approval.kind}"[:200], "info")
 
     # -- dispatch ----------------------------------------------------------------
     def _repo(self, task: Task) -> Repo | None:
@@ -299,6 +350,12 @@ class Autopilot:
         if step is None:
             self.finish(task, "all steps done")
             return None
+        need = int(self.s.caps.get("min_free_memory_mb", 0) or 0)
+        if need and step.kind in ("code", "test"):
+            free = self.free_memory_mb()
+            if free < need:
+                self.apply(task, step, Outcome("defer", note=f"{free} MB free, {need} MB needed: heavy work waits rather than compete for memory", delay=600))
+                return None
         lease: Lease | None = None
         mode = ""
         if step.kind == "code":
@@ -424,6 +481,24 @@ class Autopilot:
             except GitError as exc:
                 self.log(task.id, "git", f"worktree kept: {exc}")
 
+    # -- approval gates ------------------------------------------------------------
+    def gate(self, task: Task, step: Step, kind: str, title: str, detail: str = "", scope_key: str = "") -> Outcome | None:
+        """``None`` = cleared to act. Otherwise the step parks on an approval or goes to the owner.
+
+        The request is a row in the queue database, so it waits as long as it has
+        to. An open allow session answers it on the spot.
+        """
+        if not self.approvals.needed(kind):
+            return None
+        approval = self.approvals.request(kind, task.id, step.id, title, detail, scope_key)
+        if approval.approved:
+            self.audit("approval_granted", kind, {"task": task.id, "ticket": approval.ticket, "by": approval.actor})
+            return None
+        if approval.state == DENIED:
+            return Outcome("owner", note=f"you denied {kind}: {approval.result or approval.title}"[:300])
+        self.audit("approval_requested", kind, {"task": task.id, "ticket": approval.ticket, "what": title[:200]})
+        return Outcome("park", note=f"needs your approval ({kind}, {approval.ticket}): {title[:150]}", ticket=approval.ticket)
+
     # -- step kinds (worker threads) -----------------------------------------------
     def _context(self, task: Task) -> str:
         done = [f"- {s.kind} {s.title}: {s.result[:400]}" for s in task.steps if s.state == "done" and s.result]
@@ -477,6 +552,21 @@ class Autopilot:
         repo = self._repo(task)
         if repo is None:
             return Outcome("skip", note="no repository: code step dropped")
+        where = f"{lease.label} (local)" if mode == "local" and lease else f"{repo.coder} (cloud)"
+        blocked = self.gate(
+            task, step, "code",
+            f"Edit {repo.name} for #{task.id}: {task.title[:120]}",
+            detail=(
+                f"Task #{task.id}: {task.title}\n"
+                f"Repository: {repo.name} ({repo.path})\nBranch: {task.branch or branch_for(task.id, task.title)}\n"
+                f"Coder: {where}\nStep {step.idx + 1}/{len(task.steps)}: {step.title}\n\n"
+                f"What it is asked to do:\n{str(step.args.get('prompt') or task.title)[:2000]}\n\n"
+                "Edits happen in a throwaway worktree; pushing needs a second approval."
+            ),
+            scope_key=self.approvals.code_scope(task.id, step.id),
+        )
+        if blocked is not None:
+            return blocked
         worktree = self._worktree(task, repo)
         if mode == "local" and lease is not None:
             return self.run_local(task, step, repo, worktree, lease)
@@ -592,6 +682,24 @@ class Autopilot:
             return Outcome("fail", note="refusing to push or open a PR: the last test step did not pass")
         if not self.dry_run and self.git.ahead(repo, worktree) == 0:
             return Outcome("owner", note="the coding session made no commits; nothing to push")
+        diffstat = "" if self.dry_run else self.git.diffstat(repo, worktree)
+        touched = files_changed(diffstat)
+        cap = int(self.s.caps.get("max_files_per_task", 0) or 0)
+        if cap and touched > cap:
+            return Outcome("owner", result=diffstat[-4000:], note=f"branch {task.branch} touches {touched} files (cap {cap}); read it yourself before it goes anywhere")
+        blocked = self.gate(
+            task, step, "push",
+            f"Push {task.branch} to {repo.github or repo.name} for #{task.id}",
+            detail=(
+                f"Task #{task.id}: {task.title}\nRepository: {repo.name} -> {repo.github} ({repo.remote}), base {repo.base}\n"
+                f"Branch: {task.branch} ({touched} file(s) changed)\nWritten by: {self.store.get(task.id).authors or '(unknown)'}\n\n"
+                f"{diffstat[:4000]}\n"
+                "Approving pushes this branch and opens or updates a draft PR. Nothing is merged."
+            ),
+            scope_key=f"push:{task.id}:{step.id}",
+        )
+        if blocked is not None:
+            return blocked
         self.git.push(repo, worktree, task.branch)
         fresh = self.store.get(task.id)
         authors = [a for a in fresh.authors.split(",") if a]
@@ -599,7 +707,6 @@ class Autopilot:
         if fresh.pr_url and not fresh.pr_url.startswith("(dry-run)"):
             self.git.open_draft_pr(repo, worktree, task.branch, task.title, "", labels)  # existing PR: adds labels only
             return Outcome("done", result=fresh.pr_url, note="pushed to the draft PR")
-        diffstat = "" if self.dry_run else self.git.diffstat(repo, worktree)
         notes = "\n\n".join(s.result[-1500:] for s in task.steps if s.kind == "code" and s.state == "done")
         body = self.planner.summarize_pr(task, diffstat, tests[-1].result, notes)
         body += f"\n\nWritten by: {', '.join(authors) or '(unknown)'}\n"
@@ -670,7 +777,11 @@ class Autopilot:
     # -- owner-facing ----------------------------------------------------------
     def needs_you(self) -> list[str]:
         items = []
+        for approval in self.approvals.pending():
+            items.append(f"Approve {approval.kind}: {approval.title[:60]} ({approval.ticket})")
         for step in self.store.waiting_steps():
+            if is_local(step.ticket_id):
+                continue  # already listed above, with its own wording
             task = self.store.get(step.task_id)
             items.append(f"Approve {step.args.get('tool', '?')} for #{task.id} (ticket {step.ticket_id})")
         for task in self.store.tasks(["needs_owner"]):

@@ -329,6 +329,12 @@ headless) do real code changes within hard per-run and per-day caps. It never
 pushes to your main branch: every change arrives as a **draft pull request**
 with test evidence, and CI must pass before a task counts as done.
 
+**Nothing leaves the sandbox without your yes.** A task's first coding session
+and every push are approval-gated, game actions are gated by XivMcp, and each
+request waits in the queue database until you answer - minutes or days later,
+across restarts and reboots. `almanac autopilot allow` opens a sudo-like
+5-minute window when you want to clear a pile in one go.
+
 It is off until you start it, and `dry_run = true` is the default.
 
 ```
@@ -441,13 +447,50 @@ almanac autopilot stop --now                        # kill switch: running sessi
 almanac autopilot retry <task> | cancel <task>
 almanac autopilot pool                              # model backends
 almanac autopilot digest                            # write the digest now
+
+almanac autopilot pending                           # what waits for your yes, oldest first
+almanac autopilot show ap-3                         # exactly what that one would do
+almanac autopilot approve ap-3 [--minutes 5]        # yes (and optionally open a window)
+almanac autopilot deny ap-3 [--reason "not now"]
+almanac autopilot approve all | deny all
+almanac autopilot allow [--minutes 5] [--scope all|code|push|game]
 ```
 
 The kill switch is a file (default `~/.local/state/almanac/autopilot/STOP`,
 `[autopilot] kill_switch`). While it exists nothing runs and the service is
-not restarted; delete it to allow runs again. Over MCP, `autopilot_status` is
-a read tool; `autopilot_add` and `autopilot_pause` are change tools and need
-confirmation like every other change.
+not restarted; delete it to allow runs again. Over MCP, `autopilot_status` and
+`autopilot_pending` are read tools; `autopilot_add`, `autopilot_pause` and
+`autopilot_approve` are change tools and need confirmation like every other
+change.
+
+### Approval
+
+```toml
+[autopilot.approval]
+require = ["code", "push", "game_action"]   # remove a kind to stop asking for it
+code_scope = "task"                          # one yes per task | "step": every session
+allow_session_minutes = 5                    # `almanac autopilot allow` default
+max_allow_session_minutes = 60               # a longer --minutes is clamped to this
+```
+
+| Gate | When it asks | What approving means |
+| --- | --- | --- |
+| `code` | before a task's first coding session | that task may edit its own worktree, all night if it wants |
+| `push` | before every `git push` and draft PR | this branch goes to GitHub as a draft; nothing is merged |
+| `game_action` | before any XivMcp action tool | XivMcp's own ticket, approved in game |
+
+A request is a row in `queue.sqlite`: it survives `stop`, a crash and a reboot,
+and the step that asked parks on it (the loop keeps working on other tasks).
+When the answer arrives the step **runs from where it stopped** - approval
+unblocks a step, it never stands in for it. A denial is final: the task goes to
+"needs you" with your reason and is never retried on its own. Pending items are
+also pushed to the in-game quest tracker, so you can see them without leaving
+the game, and `autopilot_pending` / `autopilot_approve` answer them from a chat
+with almanac.
+
+An allow session is deliberately dumb: a timestamp in the database, matching
+requests approved as they arrive while it lasts, nothing extended or renewed
+implicitly. `--scope code` does not cover pushes.
 
 ### Safety model
 
@@ -468,8 +511,24 @@ confirmation like every other change.
 - **GitHub:** sources use an allow-list of read-only `gh` subcommands. Writes
   are limited to pushing the task branch, opening a draft PR, labelling it and
   commenting reviews on it, and none of that happens in dry-run.
-- **Audit:** coding sessions, limits hit, PRs, tickets and failures go to
-  `audit.jsonl` (`almanac audit`) as well as the task log.
+- **Approval:** see above. Falling back to a local coder is not a way around a
+  gate: the gate is checked before either coder starts.
+- **Repositories:** only the paths listed under `[autopilot.repos.*]`, and a
+  repo whose path is inside `[autopilot] deny_paths` (`~/.config`, `~/.ssh`,
+  `~/.gnupg`, `~/.claude`, `~/.codex`, almanac's own state and knowledge repo,
+  `~/.xlcore` by default) is dropped at load time and named in `status`.
+- **Hard caps:** `max_parallel` steps in flight, `cloud_slots` cloud sessions,
+  `max_turns` / `max_wall_minutes` per session, the daily run/token/cost caps,
+  `max_files_per_task` (a bigger branch goes to you instead of a PR) and
+  `min_free_memory_mb` (coding and test steps wait rather than compete for
+  memory with whatever else the machine is doing).
+- **Never:** force-push, push to a protected or base branch, push a branch that
+  is not `autopilot/<task>`, merge, deploy, or push at all before a `push`
+  approval and a passing test step.
+- **Audit:** coding sessions, limits hit, PRs, tickets, approvals asked and
+  answered, and failures go to `audit.jsonl` (`almanac audit`) as well as the
+  task log and `<state>/autopilot/autopilot.log`, a plain-text append-only
+  line per action with timestamps.
 
 ### Adding repositories and sources
 
