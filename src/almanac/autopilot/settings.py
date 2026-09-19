@@ -59,7 +59,7 @@ DEFAULTS: dict[str, Any] = {
     # Local coding agent used when cloud coding is capped, rate-limited, out of
     # quota or unauthenticated: "aider" or "codex" (Codex CLI with a local
     # provider), or a custom argv with {prompt} {model} {base_url} {worktree} {test}.
-    "local_coder": {"tool": "aider", "argv": [], "extra_args": []},
+    "local_coder": {"tool": "codex", "argv": [], "extra_args": [], "codex_home": ""},
     # Model backends: [autopilot.pool.<name>] url, kind, model, roles, slots, ...
     # (see pool.py). Empty = the [gateway] backend only.
     "pool": {},
@@ -196,6 +196,12 @@ class Settings:
     @property
     def digest_dir(self) -> Path:
         return expand(self.raw["digest_dir"]) if self.raw["digest_dir"] else self.state_dir / "digests"
+
+    @property
+    def codex_home(self) -> Path:
+        """CODEX_HOME for local coding sessions: autopilot's own, never the owner's ~/.codex."""
+        raw = str(self.section("local_coder").get("codex_home") or "")
+        return expand(raw) if raw else self.state_dir / "codex"
 
     @property
     def protected(self) -> set[str]:

@@ -64,7 +64,7 @@ def test_dry_run_never_runs_coders_pushes_or_opens_prs(tmp_path: Path) -> None:
     run_until(pilot, clock, _done(pilot, tid))
     assert pilot.store.get(tid).state == "done"
     ran = {c["argv"][0] for c in proc.calls}
-    assert "claude" not in ran and "aider" not in ran
+    assert "claude" not in ran and "codex" not in ran and "aider" not in ran
     assert not [a for a in proc.argvs("git") if "push" in a]
     assert not proc.argvs("gh pr create") and not proc.argvs("gh pr comment")
     assert any("dry-run: would run gh pr create" in e["message"] for e in pilot.store.events())
@@ -128,10 +128,12 @@ def test_rate_limit_switches_to_a_local_coder_and_labels_the_pr(tmp_path: Path) 
     run_until(pilot, clock, _done(pilot, tid), step_seconds=60)
     task = pilot.store.get(tid)
     assert task.state == "done"
-    (aider,) = proc.argvs("aider")
-    assert aider[:3] == ["aider", "--model", "openai/qwen-coder"]
-    env = next(c["env"] for c in proc.calls if c["argv"][0] == "aider")
+    (codex,) = proc.argvs("codex")
+    assert codex[:2] == ["codex", "exec"] and "-m" in codex and codex[codex.index("-m") + 1] == "qwen-coder"
+    env = next(c["env"] for c in proc.calls if c["argv"][0] == "codex")
     assert env["OPENAI_API_BASE"] == "http://gpu-a/v1"
+    # codex runs with autopilot's own CODEX_HOME, not the owner's ~/.codex
+    assert env["CODEX_HOME"] == str(pilot.s.codex_home) and Path(env["CODEX_HOME"]).is_dir()
     assert task.authors == "local:qwen-coder@gpu-a"
     (create,) = proc.argvs("gh pr create")
     assert "by:local-qwen-coder-gpu-a" in create
@@ -141,7 +143,7 @@ def test_rate_limit_switches_to_a_local_coder_and_labels_the_pr(tmp_path: Path) 
     t2, _ = app.add(pilot.store, "Second fix", "demo")
     run_until(pilot, clock, _done(pilot, t2), step_seconds=60)
     assert len([c for c in proc.calls if c["argv"][0] == "claude"]) == 1
-    assert len(proc.argvs("aider")) == 2
+    assert len(proc.argvs("codex")) == 2
     # after the block expires, cloud coding is used again
     clock.advance(3600)
     t3, _ = app.add(pilot.store, "Third fix", "demo")
@@ -158,7 +160,7 @@ def test_daily_cap_uses_local_coder_with_smaller_split_steps(tmp_path: Path) -> 
     task = pilot.store.get(tid)
     assert task.state == "done"
     assert [c for c in proc.calls if c["argv"][0] == "claude"] == []
-    prompts = [a[-1] for a in proc.argvs("aider")]
+    prompts = [a[-1] for a in proc.argvs("codex")]
     assert len(prompts) == 2 and "add the parser" in prompts[0] and "wire it in" in prompts[1]
     assert [s.kind for s in task.steps][:6] == ["code", "code", "test", "code", "test", "test"]
 

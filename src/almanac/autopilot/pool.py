@@ -46,6 +46,7 @@ class Backend:
     kind: str = "ollama"  # almanac | ollama | openai
     model: str = "qwen3.5:9b"
     coder_model: str = ""  # model for local coding sessions (default: model)
+    context: int = 32768  # context the backend actually serves; local coding tools are told this
     roles: list[str] = field(default_factory=lambda: list(ROLES))
     slots: int = 1
     priority: int = 0  # higher first
