@@ -1,0 +1,15 @@
+description = "Fetch an HTTPS URL and report status code, timing and final URL (follows redirects, no body)."
+safety = "read"
+run_on = "local"
+timeout = 30
+
+[params.url]
+type = "string"
+pattern = "https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/%?=&+-]*)?"
+required = true
+description = "https:// URL to check."
+
+[[commands]]
+# {{ and }} are literal braces (curl's own format variables).
+argv = ["curl", "-sS", "-L", "-o", "/dev/null", "--max-time", "20",
+        "-w", "%{{http_code}} %{{time_total}}s %{{url_effective}}\n", "{url}"]

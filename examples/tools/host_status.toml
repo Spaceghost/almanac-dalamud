@@ -1,0 +1,28 @@
+description = "Uptime, load, memory, disk usage and failed services of one host."
+safety = "read"
+run_on = "{host}"
+hosts = ["*"]          # any host in the config
+timeout = 30
+
+[[commands]]
+argv = ["uptime"]
+
+[[commands]]
+argv = ["free", "-m"]
+
+[[commands]]
+label = "df -h"
+argv = ["df", "-h", "-x", "tmpfs", "-x", "devtmpfs", "-x", "overlay", "-x", "squashfs"]
+init = ["systemd"]
+
+[[commands]]
+argv = ["df", "-h"]
+init = ["openrc"]      # busybox df has no -x
+
+[[commands]]
+argv = ["systemctl", "--failed", "--no-legend", "--no-pager"]
+init = ["systemd"]
+
+[[commands]]
+argv = ["rc-status", "--crashed"]
+init = ["openrc"]

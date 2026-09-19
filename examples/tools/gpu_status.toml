@@ -1,0 +1,11 @@
+description = "NVIDIA GPUs of a host: index, name, UUID, memory used/total, utilisation, and processes."
+safety = "read"
+run_on = "{host}"
+hosts = ["*"]
+timeout = 20
+
+[[commands]]
+argv = ["nvidia-smi", "--query-gpu=index,name,uuid,memory.used,memory.total,utilization.gpu", "--format=csv"]
+
+[[commands]]
+argv = ["nvidia-smi", "--query-compute-apps=gpu_uuid,pid,process_name,used_memory", "--format=csv"]

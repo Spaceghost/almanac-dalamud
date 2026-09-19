@@ -1,0 +1,16 @@
+description = "Copy a built plugin into a Dalamud dev plugin folder (example; Dalamud hot-reloads it if 'Dev Plugin Locations' lists the folder)."
+safety = "change"
+run_on = "local"
+timeout = 60
+
+[params.plugin]
+type = "string"
+pattern = "[A-Za-z][A-Za-z0-9._-]{0,63}"
+required = true
+description = "Plugin name, e.g. MyDalamudPlugin."
+
+[[commands]]
+argv = ["mkdir", "-p", "{@home}/dev-plugins/{plugin}"]
+
+[[commands]]
+argv = ["cp", "-r", "-T", "{@home}/src/{plugin}/bin/Release", "{@home}/dev-plugins/{plugin}"]
