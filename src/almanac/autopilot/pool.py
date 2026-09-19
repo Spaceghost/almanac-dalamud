@@ -5,8 +5,9 @@ another machine, an Ollama server, or any OpenAI-compatible server. Each has
 ``roles`` (planner, coder, reviewer; reviewers also propose missing tests), a number of concurrent
 ``slots``, and optional availability rules:
 
-* ``unavailable_while_process``: process names (checked in this machine's
-  /proc) that make the backend off-limits while they run, e.g. a game that
+* ``unavailable_while_process``: process names (matched like ``[residency]``:
+  argv[0] basename in this machine's /proc, Wine paths included) that make the
+  backend off-limits while they run, e.g. a game that
   needs that GPU. A job already running on it is stopped within seconds and,
   for an Ollama backend, the model is asked to unload.
 * ``check_command``: argv that must exit 0 for the backend to be used (for
@@ -31,26 +32,11 @@ from typing import Any, Callable
 import httpx
 
 from ..guard import Guard
+from ..residency import running_matches
 from .planner import ModelUnavailable
 
 ROLES = ("planner", "coder", "reviewer")
 HEALTH_PATHS = {"almanac": "/healthz", "ollama": "/api/version", "openai": "/v1/models"}
-
-
-def running_processes(proc_root: Path = Path("/proc")) -> set[str]:
-    """Lower-cased process names (comm and argv[0] basename, which catches Wine .exe names)."""
-    names: set[str] = set()
-    for entry in proc_root.iterdir() if proc_root.is_dir() else []:
-        if not entry.name.isdigit():
-            continue
-        try:
-            names.add((entry / "comm").read_text().strip().lower())
-            argv0 = (entry / "cmdline").read_bytes().split(b"\0", 1)[0].decode(errors="replace")
-            if argv0:
-                names.add(argv0.replace("\\", "/").rsplit("/", 1)[-1].lower())
-        except OSError:
-            continue
-    return names
 
 
 @dataclass
@@ -113,7 +99,7 @@ class Pool:
         backends: list[Backend],
         get: Callable[..., Any] | None = None,
         post: Callable[..., Any] | None = None,
-        processes: Callable[[], set[str]] = running_processes,
+        match: Callable[[list[str]], list[str]] = running_matches,
         run_check: Callable[[list[str]], int] | None = None,
         clock: Callable[[], float] = time.time,
         ttl: float = 30.0,
@@ -122,7 +108,7 @@ class Pool:
         self.backends = {b.name: b for b in backends}
         self._get = get or httpx.get
         self._post = post or httpx.post
-        self._processes = processes
+        self._match = match
         self._run_check = run_check or (lambda argv: subprocess.run(argv, capture_output=True, timeout=20).returncode)
         self.clock = clock
         self.ttl = ttl
@@ -145,8 +131,7 @@ class Pool:
         if not backend.enabled:
             return "disabled in config"
         if backend.unavailable_while_process:
-            running = self._processes()
-            hit = [p for p in backend.unavailable_while_process if p.lower() in running]
+            hit = self._match(list(backend.unavailable_while_process))
             if hit:
                 return f"off-limits while {', '.join(hit)} runs"
         if backend.check_command:

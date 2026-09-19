@@ -202,7 +202,7 @@ def make_pool(clock: Clock, backends: list[Backend] | None = None, processes: se
         return Resp(200)
 
     members = backends if backends is not None else [Backend("gpu-a", "http://gpu-a", "ollama", "qwen-coder")]
-    return Pool(members, get=get, post=lambda *a, **k: Resp(200), processes=lambda: running, clock=clock)
+    return Pool(members, get=get, post=lambda *a, **k: Resp(200), match=lambda wanted: [w for w in wanted if w.lower() in running], clock=clock)
 
 
 def make_pilot(
