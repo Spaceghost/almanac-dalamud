@@ -1,0 +1,21 @@
+description = "Last lines of a Dalamud (FFXIV plugin framework) log under XIVLauncher.Core's ~/.xlcore/logs."
+safety = "read"
+run_on = "local"
+timeout = 15
+max_output = 20000
+
+[params.log]
+type = "string"
+enum = ["dalamud.log", "dalamud.boot.log", "dalamud.injector.log", "dalamud.crashhandler.log", "launcher.log"]
+default = "dalamud.log"
+description = "Which log file."
+
+[params.lines]
+type = "integer"
+minimum = 1
+maximum = 2000
+default = 100
+description = "Number of lines."
+
+[[commands]]
+argv = ["tail", "-n", "{lines}", "{@home}/.xlcore/logs/{log}"]

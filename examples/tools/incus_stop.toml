@@ -1,0 +1,24 @@
+description = "Stop a running Incus instance (interrupts whatever it serves)."
+safety = "destructive"
+run_on = "local"
+timeout = 120
+
+[params.remote]
+type = "string"
+pattern = "[a-z][a-z0-9-]{0,62}"
+required = true
+description = "Incus remote name."
+
+[params.instance]
+type = "string"
+pattern = "[a-z][a-z0-9-]{0,62}"
+required = true
+description = "Instance name."
+
+[params.project]
+type = "string"
+pattern = "[a-z][a-z0-9_-]{0,62}"
+description = "Incus project."
+
+[[commands]]
+argv = ["incus", "stop", "{remote}:{instance}", { when = "project", argv = ["--project", "{project}"] }]

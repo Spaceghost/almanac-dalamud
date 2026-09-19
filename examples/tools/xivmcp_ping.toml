@@ -1,0 +1,14 @@
+description = "Is the XivMcp in-game MCP server up? Reports the HTTP status of its /mcp endpoint without a token (401 = up and enforcing auth; connection refused = game or plugin not running)."
+safety = "read"
+run_on = "local"
+timeout = 10
+
+[params.port]
+type = "integer"
+minimum = 1024
+maximum = 65535
+default = 41800
+description = "XivMcp port."
+
+[[commands]]
+argv = ["curl", "-sS", "-o", "/dev/null", "--max-time", "5", "-w", "%{{http_code}}\n", "http://127.0.0.1:{port}/mcp"]

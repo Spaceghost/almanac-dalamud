@@ -1,0 +1,19 @@
+description = "Status and recent log lines of one system service (systemd or OpenRC)."
+safety = "read"
+run_on = "{host}"
+hosts = ["*"]
+timeout = 30
+
+[params.unit]
+type = "string"
+pattern = "[A-Za-z0-9][A-Za-z0-9@._-]{0,80}"
+required = true
+description = "Service name, e.g. sshd or incus."
+
+[[commands]]
+argv = ["systemctl", "status", "--no-pager", "--lines=20", "{unit}"]
+init = ["systemd"]
+
+[[commands]]
+argv = ["rc-service", "{unit}", "status"]
+init = ["openrc"]

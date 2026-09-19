@@ -1,0 +1,7 @@
+description = "Screenshot of the local desktop via xdg-desktop-portal (non-interactive). Returns the saved PNG path."
+safety = "read"
+run_on = "local"
+timeout = 40
+
+[[commands]]
+argv = ["{@python}", "-m", "almanac.helpers.screenshot"]

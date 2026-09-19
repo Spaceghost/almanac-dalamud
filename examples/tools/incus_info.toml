@@ -1,0 +1,24 @@
+description = "Details of one Incus instance: state, resources, snapshots, recent log."
+safety = "read"
+run_on = "local"
+timeout = 30
+
+[params.remote]
+type = "string"
+pattern = "[a-z][a-z0-9-]{0,62}"
+required = true
+description = "Incus remote name."
+
+[params.instance]
+type = "string"
+pattern = "[a-z][a-z0-9-]{0,62}"
+required = true
+description = "Instance name."
+
+[params.project]
+type = "string"
+pattern = "[a-z][a-z0-9_-]{0,62}"
+description = "Incus project."
+
+[[commands]]
+argv = ["incus", "info", "{remote}:{instance}", { when = "project", argv = ["--project", "{project}"] }]

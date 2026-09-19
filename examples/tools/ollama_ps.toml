@@ -1,0 +1,7 @@
+description = "Models currently loaded by the local Ollama (name, size, VRAM, expiry). Empty list = nothing resident."
+safety = "read"
+run_on = "local"
+timeout = 10
+
+[[commands]]
+argv = ["curl", "-sS", "--max-time", "5", "http://127.0.0.1:11434/api/ps"]

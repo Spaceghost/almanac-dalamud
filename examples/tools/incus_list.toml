@@ -1,0 +1,25 @@
+description = "List Incus instances on a remote (as configured in `incus remote list`), optionally in one project or all projects."
+safety = "read"
+run_on = "local"
+timeout = 30
+
+[params.remote]
+type = "string"
+pattern = "[a-z][a-z0-9-]{0,62}"
+required = true
+description = "Incus remote name."
+
+[params.project]
+type = "string"
+pattern = "[a-z][a-z0-9_-]{0,62}"
+description = "Incus project (default project if omitted)."
+
+[params.all_projects]
+type = "boolean"
+default = false
+description = "List instances in every project."
+
+[[commands]]
+argv = ["incus", "list", "{remote}:", "--format", "compact",
+        { when = "project", argv = ["--project", "{project}"] },
+        { when = "all_projects", argv = ["--all-projects"] }]

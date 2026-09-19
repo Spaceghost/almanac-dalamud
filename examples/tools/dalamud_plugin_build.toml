@@ -1,0 +1,8 @@
+description = "Build a Dalamud plugin checkout with `dotnet build -c Release` (example; point `cwd` at your plugin)."
+safety = "change"
+run_on = "local"
+timeout = 900
+cwd = "{@home}/src/MyDalamudPlugin"
+
+[[commands]]
+argv = ["dotnet", "build", "-c", "Release", "--nologo"]

@@ -1,0 +1,30 @@
+description = "Create a snapshot of an Incus instance (adds storage use; does not change the running instance)."
+safety = "change"
+run_on = "local"
+timeout = 300
+
+[params.remote]
+type = "string"
+pattern = "[a-z][a-z0-9-]{0,62}"
+required = true
+description = "Incus remote name."
+
+[params.instance]
+type = "string"
+pattern = "[a-z][a-z0-9-]{0,62}"
+required = true
+description = "Instance name."
+
+[params.snapshot]
+type = "string"
+pattern = "[a-z0-9][a-z0-9-]{0,62}"
+required = true
+description = "Snapshot name, e.g. before-upgrade-2026-01-01."
+
+[params.project]
+type = "string"
+pattern = "[a-z][a-z0-9_-]{0,62}"
+description = "Incus project."
+
+[[commands]]
+argv = ["incus", "snapshot", "create", "{remote}:{instance}", "{snapshot}", { when = "project", argv = ["--project", "{project}"] }]
