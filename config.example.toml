@@ -42,6 +42,12 @@ unload_below_mem_available_mb = 900  # unload the resident model below this
 gpu_uuid = ""                        # nvidia-smi -L; enables the VRAM check
 min_gpu_free_mb = 6500
 
+[residency]                          # keep the model pinned while these processes run (see README)
+keep_loaded_while_process = []       # e.g. ["ffxiv_dx11.exe"]; argv[0] basename, case-insensitive, Wine paths ok
+idle_keep_alive = "5m"               # restored when they exit, so the model unloads later as usual
+poll_seconds = 20
+preload = true                       # load as soon as a process appears (false: pin only once loaded)
+
 [kb]
 embed_model = ""                     # e.g. "embeddinggemma" once pulled; then `almanac index --embed`
 

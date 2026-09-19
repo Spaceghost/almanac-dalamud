@@ -250,7 +250,53 @@ truncated. `almanac tools -v` prints the JSON schema clients see.
   companion keeps them.
 - **Resources:** the gateway will not load a model when available memory or
   the inference GPU's free VRAM is below the configured floor, and unloads the
-  resident model when memory runs low.
+  resident model when memory runs low. Residency pins (above) go through the
+  same guard.
+
+## Model residency
+
+By default the model loads on the first request and unloads after Ollama's
+`keep_alive` (e.g. 5 minutes idle). On a gaming machine you may prefer the
+opposite while a game runs: the model stays loaded, so asking almanac
+something mid-session never waits for a cold load and never has to find
+free VRAM at a bad moment.
+
+```toml
+[residency]
+keep_loaded_while_process = ["ffxiv_dx11.exe"]
+idle_keep_alive = "5m"
+poll_seconds = 20
+preload = true
+```
+
+A loop inside `almanac-gateway` (no extra daemon) checks every
+`poll_seconds`:
+
+- **A listed process is running:** the model (`[residency] model`, default
+  `[gateway] default_model`, which must be in `allowed_models`) is loaded and
+  pinned with Ollama's `POST /api/generate {"model": ..., "keep_alive": -1}`
+  (no prompt: it loads without generating). With `preload = false` it is only
+  pinned once a request has loaded it. The pin is re-asserted whenever the
+  model disappears (backend restart, memory-guard unload) or a request resets
+  its `keep_alive`.
+- **The guard still applies:** if the model is not resident and the guard
+  refuses to load it (host memory below `min_mem_available_mb`, or the
+  `gpu_uuid` GPU below `min_gpu_free_mb`), the state is `deferred` and it
+  retries on the next poll. The guard's low-memory unload also still wins
+  over a pin; the pin comes back once memory recovers.
+- **They have all exited:** `keep_alive` is set back to `idle_keep_alive`
+  (same call), so the model unloads later exactly as before.
+
+Processes match on the basename of `argv[0]` in `/proc/*/cmdline`,
+case-insensitively; Windows paths as Wine shows them
+(`Z:\...\game\ffxiv_dx11.exe`) match, and under a Wine loader argv[1] is
+checked too. A shell or editor that merely mentions the name does not match.
+
+State changes (`pinned`, `idle`/released, `deferred`, `backend_down`) are
+logged once to the gateway's journal. The current state is in the gateway's
+`/healthz` under `residency`, and the read tool `model_residency` (MCP and
+the local agent) returns the state the gateway last published to
+`<state_dir>/residency.json`.
 
 ## FFXIV and Dalamud
 
@@ -277,7 +323,8 @@ truncated. `almanac tools -v` prints the JSON schema clients see.
 
 ```
 src/almanac/      config, kb (index), tools (TOML runner), service (confirm+audit),
-                  mcp_server, gateway, codex_compat, guard, agent, chat, upstream, cli
+                  mcp_server, gateway, codex_compat, guard, residency, agent, chat,
+                  upstream, cli
 examples/         knowledge/ and tools/ to copy from
 deploy/           install.sh, systemd user units, Quadlet, Incus profile
 docs/TOOLS.md     tool file reference
