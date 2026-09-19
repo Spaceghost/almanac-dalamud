@@ -99,7 +99,8 @@ REPO_DEFAULTS: dict[str, Any] = {
     "setup": [],  # optional argv before tests (e.g. dependency restore)
     "coder": "",  # default: [autopilot] coder
     "allow_ssh_hosts": [],  # hosts a coding session may ssh to (default: none)
-    "allow_network": True,  # coding CLIs need their API; False only for fully local coders
+    "allow_network": True,  # coding CLIs need their API. Local coding sessions always get the
+    # network (they call the backend); this only affects cloud sessions and test runs.
     "priority": 0,  # added to every task's value for this repo
 }
 

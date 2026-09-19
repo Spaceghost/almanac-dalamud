@@ -462,7 +462,8 @@ class Autopilot:
             task.worktree, task.branch = str(path), branch
         return path
 
-    def _sandboxed(self, argv: list[str], repo: Repo, worktree: Path) -> list[str]:
+    def _sandboxed(self, argv: list[str], repo: Repo, worktree: Path, writable: list[str] | None = None,
+                   network: bool | None = None) -> list[str]:
         sandbox = self.s.section("sandbox")
         if sandbox_mode(str(sandbox.get("mode", "auto")), self.which) != "bwrap":
             return argv
@@ -471,7 +472,9 @@ class Autopilot:
         except GitError:
             git_dir = None
         hide = [expand(p) for p in sandbox.get("hide", [])]
-        return bwrap_argv(worktree, git_dir, list(sandbox.get("writable", [])), bool(repo.allow_ssh_hosts), repo.allow_network, hide) + argv
+        paths = list(sandbox.get("writable", [])) + list(writable or [])
+        allow_network = repo.allow_network if network is None else network
+        return bwrap_argv(worktree, git_dir, paths, bool(repo.allow_ssh_hosts), allow_network, hide) + argv
 
     def step_code(self, task: Task, step: Step, lease: Lease | None, mode: str) -> Outcome:
         repo = self._repo(task)
@@ -531,12 +534,17 @@ class Autopilot:
             if len(pieces) > 1:
                 return Outcome("split", note="split for a local coder", parts=pieces)
         settings = self.s.section("local_coder")
-        tool = str(settings.get("tool", "aider"))
+        tool = str(settings.get("tool", "codex"))
         model = backend.coder_model or backend.model
         author = f"local:{model}@{backend.name}"
+        codex_home = self.s.codex_home if tool == "codex" else None
+        if codex_home is not None:
+            codex_home.mkdir(parents=True, exist_ok=True)
         argv = local_coder_argv(settings, repo, worktree, backend.openai_base, model,
                                 session_prompt(repo, task.branch, prompt), backend.context)
-        argv = self._sandboxed(argv, repo, worktree)
+        # A local coding session talks to the backend over the network whatever the
+        # repo says, and the tool needs its own state directory to be writable.
+        argv = self._sandboxed(argv, repo, worktree, [str(codex_home)] if codex_home else None, network=True)
         limit = int(self.budget.per_run()["local_max_seconds"])
         self.audit("coding_session", f"local:{tool}", {"task": task.id, "repo": repo.name, "branch": task.branch, "backend": backend.name, "model": model, "max_seconds": limit})
         if self.dry_run:
@@ -544,9 +552,6 @@ class Autopilot:
             return Outcome("done", result="dry-run: no local coding session run", note="dry-run")
         token = backend.token()
         self.redact.add(token)
-        codex_home = self.s.codex_home if tool == "codex" else None
-        if codex_home is not None:
-            codex_home.mkdir(parents=True, exist_ok=True)
         env = child_env(list(self.s["pass_env"]), self.environ,
                         local_coder_env(backend.openai_base, token, str(codex_home or "")), False)
         raw = self.proc(argv, worktree, env, float(limit), None, self.pool.abort_reason(lease))
