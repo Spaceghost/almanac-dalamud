@@ -277,6 +277,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--on-calendar", required=True, help="systemd OnCalendar=, e.g. daily or 'Mon *-*-* 09:00'")
     p.add_argument("--enable", action="store_true")
     add("audit", cmd_audit, "show the audit log tail").add_argument("-n", type=int, default=20)
+    from .autopilot.cli import register as register_autopilot
+
+    register_autopilot(sub)
 
     ns = parser.parse_args(argv)
     level = logging.INFO if ns.command in ("mcp", "gateway") else logging.WARNING
