@@ -13,6 +13,11 @@ Task states::
     done | cancelled
 
 Step states: pending, running, done, failed, waiting (on a ticket), skipped.
+
+The same file holds the owner's approval queue (``approvals``: every pending
+code change, push and game action, with its answer and who gave it), the usage
+ledger that the daily caps are computed from, and the event log. One file, so a
+restart, a reboot or a kill in the middle of a step loses nothing.
 """
 
 from __future__ import annotations
@@ -81,9 +86,26 @@ CREATE TABLE IF NOT EXISTS usage (
   seconds REAL NOT NULL,
   ts REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS approvals (
+  id INTEGER PRIMARY KEY,
+  ticket TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL,
+  task_id INTEGER NOT NULL DEFAULT 0,
+  step_id INTEGER NOT NULL DEFAULT 0,
+  scope_key TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  detail TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL DEFAULT 'pending',
+  actor TEXT NOT NULL DEFAULT '',
+  result TEXT NOT NULL DEFAULT '',
+  created REAL NOT NULL,
+  settled REAL NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS flags (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS events_task ON events(task_id, ts);
 CREATE INDEX IF NOT EXISTS usage_day ON usage(day);
+CREATE INDEX IF NOT EXISTS approvals_state ON approvals(state, id);
+CREATE INDEX IF NOT EXISTS approvals_scope ON approvals(scope_key);
 """
 
 OPEN_STATES = ("queued", "ready", "waiting", "review", "needs_owner")
@@ -353,6 +375,50 @@ class Store:
             f"SELECT COUNT(*) AS runs, COALESCE(SUM(tokens),0) AS tokens, COALESCE(SUM(cost),0) AS cost FROM usage WHERE {where}", params
         ).fetchone()
         return {"runs": int(row["runs"]), "tokens": int(row["tokens"]), "cost": float(row["cost"])}
+
+    # -- approvals -----------------------------------------------------------
+    @locked
+    def add_approval(self, kind: str, task_id: int, step_id: int, title: str, detail: str = "", scope_key: str = "") -> dict[str, Any]:
+        now = self.clock()
+        cur = self.db.execute(
+            "INSERT INTO approvals (ticket, kind, task_id, step_id, scope_key, title, detail, created) VALUES ('',?,?,?,?,?,?,?)",
+            (kind, int(task_id), int(step_id), scope_key, title, detail, now),
+        )
+        row_id = int(cur.lastrowid or 0)
+        ticket = f"ap-{row_id}"
+        self.db.execute("UPDATE approvals SET ticket = ? WHERE id = ?", (ticket, row_id))
+        row = self.db.execute("SELECT * FROM approvals WHERE id = ?", (row_id,)).fetchone()
+        return dict(row)
+
+    @locked
+    def approval(self, ticket: str) -> dict[str, Any] | None:
+        row = self.db.execute("SELECT * FROM approvals WHERE ticket = ?", (ticket,)).fetchone()
+        return dict(row) if row else None
+
+    @locked
+    def approval_by_scope(self, scope_key: str) -> dict[str, Any] | None:
+        """The newest approval for a scope key: an answered one is reused, a pending one parked on again."""
+        if not scope_key:
+            return None
+        row = self.db.execute(
+            "SELECT * FROM approvals WHERE scope_key = ? AND state IN ('pending','approved') ORDER BY id DESC LIMIT 1", (scope_key,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    @locked
+    def approvals(self, state: str | None = "pending", limit: int = 200) -> list[dict[str, Any]]:
+        if state:
+            rows = self.db.execute("SELECT * FROM approvals WHERE state = ? ORDER BY id LIMIT ?", (state, limit)).fetchall()
+        else:
+            rows = self.db.execute("SELECT * FROM approvals ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    @locked
+    def settle_approval(self, ticket: str, state: str, actor: str, result: str = "") -> None:
+        self.db.execute(
+            "UPDATE approvals SET state = ?, actor = ?, result = ?, settled = ? WHERE ticket = ? AND state = 'pending'",
+            (state, actor, result[:4000], self.clock(), ticket),
+        )
 
     @locked
     def flag(self, key: str, default: str = "") -> str:

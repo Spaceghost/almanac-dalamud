@@ -76,6 +76,13 @@ reasoning_effort = "none"            # thinking off: much faster on small models
 # max_attempts = 3                    # then the task goes to "needs you"
 # digest_hour = 7                     # morning digest after this local hour
 # secrets = { ANTHROPIC_API_KEY = "env:ANTHROPIC_API_KEY" }   # env:NAME or op://vault/item/field only
+# deny_paths = ["~/.config", "~/.ssh", "~/.gnupg"]              # a repo inside one of these is refused
+#
+# [autopilot.approval]                # what you must say yes to (README "Approval")
+# require = ["code", "push", "game_action"]
+# code_scope = "task"                 # one yes per task | "step": one per coding session
+# allow_session_minutes = 5           # `almanac autopilot allow`, sudo-like
+# max_allow_session_minutes = 60
 #
 # [autopilot.caps]
 # coding_runs_per_day = 2             # cloud sessions per day; then local coders take over
@@ -88,6 +95,8 @@ reasoning_effort = "none"            # thinking off: much faster on small models
 # max_parallel = 3                    # steps in flight at once (one per task)
 # cloud_slots = 1
 # review_rounds = 1
+# max_files_per_task = 40             # a branch touching more files goes to you, not to a PR
+# min_free_memory_mb = 0              # >0: coding and test steps wait while free memory is below it
 #
 # [autopilot.local_coder]
 # tool = "aider"                      # aider | codex (Codex CLI with a local provider) | custom argv

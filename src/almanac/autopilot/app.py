@@ -10,12 +10,13 @@ from typing import Any
 from ..config import Config
 from ..service import Almanac
 from ..upstream import Upstream
+from .approvals import APPROVED, DENIED, Approval, Approvals
 from .game import Game, NoGame, XivMcpGame
 from .planner import Planner
 from .pool import BackendModel, Pool, PoolModel
 from .runner import Autopilot
 from .sandbox import SubprocessRunner
-from .settings import Settings
+from .settings import Settings, append_log
 from .sources import SOURCE_VALUE, ReadOnlyGh
 from .store import OPEN_STATES, Store
 
@@ -70,18 +71,76 @@ def make_pool(config: Config, settings: Settings, store: Store | None = None) ->
 
 # -- controls (no loop needed; they only touch the queue database) ------------
 
-def add(store: Store, text: str, repo: str = "", priority: float | None = None, body: str = "") -> tuple[int, bool]:
-    return store.add_task("manual", text, body, repo, SOURCE_VALUE["manual"] if priority is None else priority, f"manual:{time.time_ns()}")
+def note(store: Store, settings: Settings | None, task_id: int | None, kind: str, message: str) -> None:
+    """Log a control action to the queue database and, when known, the durable log file."""
+    store.log(task_id, kind, message)
+    if settings is not None:
+        append_log(settings.log_file, task_id, kind, message)
 
 
-def pause(store: Store, paused: bool) -> None:
+def open_approvals(settings: Settings, store: Store) -> Approvals:
+    return Approvals(store, settings.approval, log=lambda task_id, kind, message: note(store, settings, task_id, kind, message))
+
+
+def add(store: Store, text: str, repo: str = "", priority: float | None = None, body: str = "", settings: Settings | None = None) -> tuple[int, bool]:
+    result = store.add_task("manual", text, body, repo, SOURCE_VALUE["manual"] if priority is None else priority, f"manual:{time.time_ns()}")
+    note(store, settings, result[0], "control", f"queued by the owner: {text[:200]}")
+    return result
+
+
+def pause(store: Store, paused: bool, settings: Settings | None = None) -> None:
     store.set_flag("paused", "1" if paused else "")
-    store.log(None, "control", "paused" if paused else "resumed")
+    note(store, settings, None, "control", "paused" if paused else "resumed")
 
 
-def stop(store: Store) -> None:
+def stop(store: Store, settings: Settings | None = None) -> None:
     store.set_flag("stop", "1")
-    store.log(None, "control", "stop requested")
+    note(store, settings, None, "control", "stop requested")
+
+
+# -- approvals ----------------------------------------------------------------
+
+def pending(settings: Settings, store: Store) -> list[Approval]:
+    return open_approvals(settings, store).pending()
+
+
+def answer(settings: Settings, store: Store, ticket: str, state: str, actor: str = "owner", reason: str = "") -> list[Approval]:
+    """Answer one approval, or every pending one when ``ticket`` is "all"."""
+    approvals = open_approvals(settings, store)
+    if ticket in ("all", "*"):
+        return approvals.answer_all(state, actor, reason)
+    return [approvals.settle(ticket, state, actor, reason)]
+
+
+def allow(settings: Settings, store: Store, scope: str = "all", minutes: float | None = None, actor: str = "owner") -> tuple[float, list[Approval]]:
+    return open_approvals(settings, store).open_allow(scope, minutes, actor)
+
+
+def pending_text(settings: Settings, store: Store) -> str:
+    approvals = open_approvals(settings, store)
+    items = approvals.pending()
+    lines = []
+    for session, until in approvals.sessions().items():
+        lines.append(f"allow session: {session} until {time.strftime('%H:%M:%S', time.localtime(until))} ({int(until - time.time())}s left)")
+    if not items:
+        return "\n".join(lines + ["nothing waiting for you"])
+    for approval in items:
+        age = int(time.time() - approval.created)
+        lines.append(f"{approval.ticket:8} {approval.kind:11} #{approval.task_id:<4} waiting {age // 60}m  {approval.title[:70]}")
+    lines.append("")
+    lines.append("approve: almanac autopilot approve <ticket|all>   deny: almanac autopilot deny <ticket|all>")
+    lines.append("details: almanac autopilot show <ticket>          5-minute session: almanac autopilot allow")
+    return "\n".join(lines)
+
+
+def show_text(settings: Settings, store: Store, ticket: str) -> str:
+    approval = open_approvals(settings, store).get(ticket)
+    return (
+        f"{approval.ticket} {approval.kind} {approval.state}"
+        + (f" (by {approval.actor}: {approval.result})" if approval.settled else "")
+        + f"\nasked {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(approval.created))} for task #{approval.task_id}\n"
+        f"{approval.title}\n\n{approval.detail}"
+    )
 
 
 def status(settings: Settings, store: Store) -> dict[str, Any]:
@@ -92,6 +151,7 @@ def status(settings: Settings, store: Store) -> dict[str, Any]:
     for task in store.tasks():
         counts[task.state] = counts.get(task.state, 0) + 1
     pid = store.flag("pid")
+    approvals = open_approvals(settings, store)
     return {
         "running": bool(pid),
         "pid": pid,
@@ -107,6 +167,14 @@ def status(settings: Settings, store: Store) -> dict[str, Any]:
         "waiting_on_approval": [
             {"task": s.task_id, "tool": s.args.get("tool", ""), "ticket": s.ticket_id} for s in store.waiting_steps()
         ],
+        "pending_approvals": [
+            {"ticket": a.ticket, "kind": a.kind, "task": a.task_id, "title": a.title, "asked": a.created} for a in approvals.pending()
+        ],
+        "allow_sessions": approvals.sessions(),
+        "approval_required": sorted(approvals.required),
+        "denied_repos": settings.denied,
+        "log_file": str(settings.log_file),
+        "caps": {k: settings.caps[k] for k in ("max_parallel", "cloud_slots", "max_files_per_task", "min_free_memory_mb", "max_wall_minutes") if k in settings.caps},
         "needs_owner": [{"task": t.id, "title": t.title, "note": t.note} for t in store.tasks(["needs_owner"])],
         "cloud_blocked": store.flag("cloud_blocked_reason") if float(store.flag("cloud_blocked_until", "0") or 0) > time.time() else "",
         "local_today": store.usage_for(budget.today, "local")["runs"],
@@ -126,11 +194,27 @@ def status_text(settings: Settings, store: Store) -> str:
         f"(caps {st['today']['caps']['coding_runs_per_day']} / {st['today']['caps']['tokens_per_day']:,} / ${st['today']['caps']['cost_usd_per_day']}) - {st['coding']}",
     ]
     lines.append(f"local coding today: {st['local_today']} runs" + (f"; cloud blocked: {st['cloud_blocked']}" if st["cloud_blocked"] else ""))
+    lines.append(
+        "approval required for: " + (", ".join(st["approval_required"]) or "nothing")
+        + ("; allow session: " + ", ".join(f"{k} until {time.strftime('%H:%M', time.localtime(v))}" for k, v in st["allow_sessions"].items()) if st["allow_sessions"] else "")
+    )
+    caps = st["caps"]
+    lines.append(
+        f"caps: {caps.get('max_parallel')} steps in flight ({caps.get('cloud_slots')} cloud), "
+        f"{caps.get('max_wall_minutes')} min per session, {caps.get('max_files_per_task')} files per task"
+        + (f", waits below {caps.get('min_free_memory_mb')} MB free" if caps.get("min_free_memory_mb") else "")
+    )
+    for item in st["pending_approvals"]:
+        waited = int((time.time() - item["asked"]) // 60)
+        lines.append(f"  needs approval: {item['ticket']} {item['kind']} for #{item['task']} ({waited}m) {item['title'][:60]}")
+    for name, why in st["denied_repos"].items():
+        lines.append(f"  repo {name} refused: its path is inside {why}")
     for item in st["waiting_on_approval"]:
         lines.append(f"  waiting: task #{item['task']} {item['tool']} (ticket {item['ticket']})")
     for item in st["needs_owner"]:
         lines.append(f"  needs you: #{item['task']} {item['title'][:70]} - {item['note'][:120]}")
     lines.append(f"kill switch: {st['kill_switch']}")
+    lines.append(f"action log: {st['log_file']}")
     return "\n".join(lines)
 
 

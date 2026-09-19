@@ -29,6 +29,11 @@ class GitError(RuntimeError):
     pass
 
 
+def files_changed(diffstat: str) -> int:
+    """How many files a ``git diff --stat`` output touches (its last line is the summary)."""
+    return sum(1 for line in diffstat.splitlines() if " | " in line)
+
+
 def slug(text: str, n: int = 40) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:n].strip("-") or "task"
 

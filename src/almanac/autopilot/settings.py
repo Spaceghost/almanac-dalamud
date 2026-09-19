@@ -8,6 +8,7 @@ repositories under ``[autopilot.repos.<name>]`` and turns dry-run off.
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,19 @@ DEFAULTS: dict[str, Any] = {
     "ticket_poll_seconds": 60,  # how often parked tickets are checked
     "ci_poll_seconds": 300,
     "max_attempts": 3,  # failed attempts before a task goes to the owner
+    # Owner approval. Nothing leaves a worktree without an answer here; see approvals.py.
+    "approval": {
+        "require": ["code", "push", "game_action"],
+        "code_scope": "task",  # task: one yes covers the task's coding steps | step: every session
+        "allow_session_minutes": 5,  # `almanac autopilot allow` default, sudo-like
+        "max_allow_session_minutes": 60,
+    },
+    # Paths autopilot must never work in, whatever a repo entry says. A repo whose
+    # path is inside one of these is dropped from the allow-list at load time.
+    "deny_paths": [
+        "~/.config", "~/.ssh", "~/.gnupg", "~/.local/share/keyrings", "~/.password-store",
+        "~/.claude", "~/.codex", "~/.local/state/almanac", "~/almanac-knowledge", "~/.xlcore",
+    ],
     "backoff_base_seconds": 300,
     "backoff_max_seconds": 6 * 3600,
     "kill_switch": "",  # default <state_dir>/autopilot/STOP
@@ -49,6 +63,8 @@ DEFAULTS: dict[str, Any] = {
         "local_runs_per_day": 40,
         "local_max_wall_minutes": 30,
         "local_split_parts": 3,  # local coders get smaller scopes: a code step is split into up to N
+        "max_files_per_task": 40,  # a branch touching more files than this goes to the owner instead of a PR
+        "min_free_memory_mb": 0,  # 0 = off; otherwise coding/test steps wait while free memory is below this
         # Concurrency: steps in flight at once (each on its own task), cloud sessions at once.
         "max_parallel": 3,
         "cloud_slots": 1,
@@ -118,6 +134,23 @@ def expand(path: str) -> Path:
     return Path(os.path.expandvars(str(path))).expanduser()
 
 
+def append_log(path: Path, task_id: int | None, kind: str, message: str) -> None:
+    """Append one timestamped line to the durable action log.
+
+    Best effort on purpose: a full disk or a read-only home must not stop the
+    loop, and the same events are in the queue database either way.
+    """
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    where = f"#{task_id}" if task_id else "-"
+    line = f"{stamp} {where:>6} {kind:10} {' | '.join(message.splitlines())[:1500]}\n"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
+    except OSError:
+        pass
+
+
 @dataclass
 class Repo:
     name: str
@@ -159,6 +192,7 @@ class Settings:
     raw: dict[str, Any]
     state_dir: Path
     repos: dict[str, Repo] = field(default_factory=dict)
+    denied: dict[str, str] = field(default_factory=dict)  # repo name -> why it was dropped
 
     @classmethod
     def from_config(cls, config: Config) -> "Settings":
@@ -166,10 +200,29 @@ class Settings:
         base = config.state_dir / "autopilot"
         base.mkdir(parents=True, exist_ok=True, mode=0o700)
         settings = cls(raw=raw, state_dir=base)
-        settings.repos = {
-            name: Repo.from_config(name, spec, str(raw["coder"])) for name, spec in dict(raw.get("repos", {})).items()
-        }
+        for name, spec in dict(raw.get("repos", {})).items():
+            repo = Repo.from_config(name, spec, str(raw["coder"]))
+            forbidden = settings.forbids(repo.path)
+            if forbidden:
+                settings.denied[name] = forbidden
+            else:
+                settings.repos[name] = repo
         return settings
+
+    def forbids(self, path: Path) -> str:
+        """The deny_paths entry containing ``path``, or "" when it is allowed."""
+        try:
+            target = path.expanduser().resolve()
+        except OSError:  # pragma: no cover - unreadable path
+            target = path
+        for raw in self.raw.get("deny_paths", []):
+            try:
+                denied = expand(str(raw)).resolve()
+            except OSError:  # pragma: no cover
+                continue
+            if target == denied or denied in target.parents:
+                return str(raw)
+        return ""
 
     def __getitem__(self, key: str) -> Any:
         return self.raw[key]
@@ -196,6 +249,15 @@ class Settings:
     @property
     def digest_dir(self) -> Path:
         return expand(self.raw["digest_dir"]) if self.raw["digest_dir"] else self.state_dir / "digests"
+
+    @property
+    def log_file(self) -> Path:
+        """Plain-text, append-only action log: what autopilot did, with timestamps."""
+        return self.state_dir / "autopilot.log"
+
+    @property
+    def approval(self) -> dict[str, Any]:
+        return self.section("approval")
 
     @property
     def protected(self) -> set[str]:

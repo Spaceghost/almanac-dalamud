@@ -117,9 +117,14 @@ class FakeProc:
         self.checks: list[str] = []  # buckets for successive `gh pr checks`
         self.local: list[tuple[int, str]] = []
         self.pr_exists = False
+        self.stat = " foo.py | 3 ++-\n 1 file changed, 2 insertions(+), 1 deletion(-)\n"
 
     def argvs(self, prefix: str) -> list[list[str]]:
         return [c["argv"] for c in self.calls if " ".join(c["argv"]).startswith(prefix)]
+
+    def ran(self, *words: str) -> list[list[str]]:
+        """Calls whose argv contains all of ``words`` (``git -C <dir> push ...`` and friends)."""
+        return [c["argv"] for c in self.calls if all(w in c["argv"] for w in words)]
 
     def __call__(
         self, argv: list[str], cwd: Path, env: dict[str, str], timeout: float, stdin: str | None = None,
@@ -136,7 +141,7 @@ class FakeProc:
             if "rev-list" in argv:
                 return ProcResult(0, "2\n", 0.1)
             if "--stat" in argv:
-                return ProcResult(0, " foo.py | 3 ++-\n", 0.1)
+                return ProcResult(0, self.stat, 0.1)
             if argv[3:4] == ["diff"]:
                 return ProcResult(0, "diff --git a/foo.py b/foo.py\n+new line\n", 0.1)
             if "rev-parse" in argv:
@@ -173,6 +178,9 @@ def make_settings(tmp_path: Path, **over: Any) -> Settings:
     base: dict[str, Any] = {
         "dry_run": False,
         "sandbox": {"mode": "none"},
+        # The loop tests are about the loop: the approval gates have their own file
+        # (test_autopilot_approvals.py), which turns them back on explicitly.
+        "approval": {"require": []},
         "repos": {"demo": {"path": str(tmp_path / "repo"), "github": "o/demo", "test": ["tests/run.sh"]}},
         "caps": {"coding_runs_per_day": 4, "local_split_parts": 1, "max_parallel": 1},
         "backoff_base_seconds": 60,
