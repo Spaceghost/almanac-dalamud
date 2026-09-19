@@ -216,6 +216,18 @@ def test_failures_back_off_then_go_to_the_owner(tmp_path: Path) -> None:
     assert pilot.store.get(tid).state == "ready" and pilot.store.get(tid).attempts == 0
 
 
+def test_repo_without_remote_keeps_the_branch_local(tmp_path: Path) -> None:
+    repos = {"local-only": {"path": str(tmp_path / "repo"), "remote": "", "test": ["tests/run.sh"]}}
+    pilot, proc, game, clock, _ = make_pilot(tmp_path, repos=repos)
+    tid, _ = app.add(pilot.store, "Tidy", "local-only")
+    run_until(pilot, clock, _done(pilot, tid))
+    task = pilot.store.get(tid)
+    assert task.state == "needs_owner" and "ready locally" in task.note
+    assert not [a for a in proc.argvs("git") if "fetch" in a or "push" in a] and not proc.argvs("gh")
+    (add,) = [a for a in proc.argvs("git") if "worktree" in a and "add" in a]
+    assert add[-1] == "main"
+
+
 def test_unlisted_repo_goes_to_owner(tmp_path: Path) -> None:
     pilot, proc, game, clock, _ = make_pilot(tmp_path)
     tid, _ = pilot.store.add_task("github", "x", repo="not-allowed")
