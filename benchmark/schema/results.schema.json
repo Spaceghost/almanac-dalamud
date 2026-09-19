@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spacegho.st/mods/ffxiv/almanac/schema/results.v1.json",
+  "title": "almanac-dalamud benchmark result (v1)",
+  "description": "One benchmark run of one model on one machine. Submitted anonymously to POST /mods/ffxiv/almanac/api/results. Contains no names, paths, IPs, hostnames or free text from the player; the server must reject unknown properties.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "suite", "client", "mode", "hardware", "backend", "model", "metrics", "tasks"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "suite": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "version", "sha256"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9-]{1,40}$", "description": "e.g. ffxiv-core" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "sha256 of the canonical suite JSON; results with a different hash for the same version are rejected" }
+      }
+    },
+    "client": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "enum": ["almanac-dalamud", "almanac-py"] },
+        "version": { "type": "string", "maxLength": 32 }
+      }
+    },
+    "mode": { "enum": ["live", "mock"], "description": "live = real XivMcp tools in game; mock = deterministic fixtures (CI/no game). Leaderboard ranks them separately." },
+    "hardware": {
+      "type": "object", "additionalProperties": false,
+      "required": ["gpu_model", "gpu_vendor", "vram_mb", "os"],
+      "properties": {
+        "gpu_model": { "type": "string", "maxLength": 80, "description": "Adapter marketing name as reported by DXGI/driver, e.g. 'NVIDIA GeForce RTX 4060'; 'unknown' allowed" },
+        "gpu_vendor": { "enum": ["nvidia", "amd", "intel", "apple", "other", "unknown"] },
+        "vram_mb": { "type": "integer", "minimum": 0, "maximum": 1048576, "description": "Dedicated VRAM of the inference GPU, rounded down to 256 MB" },
+        "system_ram_gb": { "type": "integer", "minimum": 0, "maximum": 4096, "description": "Rounded to whole GB" },
+        "os": { "enum": ["windows", "linux", "macos", "other"] }
+      }
+    },
+    "backend": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["ollama", "lmstudio", "llamacpp", "openai-compatible", "almanac"] },
+        "version": { "type": "string", "maxLength": 32 }
+      }
+    },
+    "model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "quant", "context", "tool_calling"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 120, "pattern": "^[A-Za-z0-9._:/@+-]+$", "description": "Backend model id, e.g. qwen3.5:9b; lower-cased by the server for grouping" },
+        "family": { "type": "string", "maxLength": 40 },
+        "params_b": { "type": ["number", "null"], "minimum": 0, "maximum": 2000 },
+        "quant": { "type": "string", "maxLength": 24, "description": "e.g. Q4_K_M, Q8_0, F16, unknown" },
+        "context": { "type": "integer", "minimum": 0, "maximum": 10485760 },
+        "tool_calling": { "enum": ["native", "prompted", "none"], "description": "native = OpenAI tools field honoured; prompted = JSON-in-text fallback; none = no tool use" }
+      }
+    },
+    "metrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["score", "success_rate", "tool_call_validity", "tokens_per_s", "ttft_ms"],
+      "properties": {
+        "score": { "type": "number", "minimum": 0, "maximum": 100, "description": "Weighted suite score" },
+        "success_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "tool_call_validity": { "type": "number", "minimum": 0, "maximum": 1, "description": "valid tool calls / all tool calls (known tool, args match schema)" },
+        "quality": { "type": "number", "minimum": 0, "maximum": 1, "description": "Mean rubric/exact-match score of final answers" },
+        "tokens_per_s": { "type": "number", "minimum": 0, "description": "Median generation speed" },
+        "ttft_ms": { "type": "number", "minimum": 0, "description": "Median time to first token" },
+        "peak_vram_mb": { "type": ["integer", "null"], "minimum": 0, "description": "Peak GPU memory in use during the run; null if unmeasurable" },
+        "total_s": { "type": "number", "minimum": 0 }
+      }
+    },
+    "tasks": {
+      "type": "array", "maxItems": 200,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "success", "score"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9_.-]{1,64}$" },
+          "success": { "type": "boolean" },
+          "score": { "type": "number", "minimum": 0, "maximum": 1 },
+          "tool_calls": { "type": "integer", "minimum": 0 },
+          "tool_calls_valid": { "type": "integer", "minimum": 0 },
+          "ttft_ms": { "type": ["number", "null"], "minimum": 0 },
+          "tokens_per_s": { "type": ["number", "null"], "minimum": 0 },
+          "output_tokens": { "type": "integer", "minimum": 0 },
+          "duration_ms": { "type": "number", "minimum": 0 },
+          "error": { "enum": [null, "timeout", "http", "bad_tool_call", "no_answer", "wrong_answer", "other"] }
+        }
+      }
+    }
+  }
+}
