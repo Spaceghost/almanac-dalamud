@@ -44,8 +44,9 @@ def build(manifest: dict, repo: str, channel: str, last_update: int, changelog: 
     if channel == "stable":
         entry["DownloadLinkInstall"] = stable
         entry["DownloadLinkUpdate"] = stable
-        entry["DownloadLinkTesting"] = testing
         entry["IsTestingExclusive"] = False
+        # No DownloadLinkTesting here: the testing channel's own listing carries it, and
+        # naming it before a test build exists would advertise a download that 404s.
         if changelog:
             entry["Changelog"] = changelog
     else:
