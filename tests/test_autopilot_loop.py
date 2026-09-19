@@ -290,7 +290,7 @@ def test_pool_roles_process_rule_failover_and_leases(tmp_path: Path) -> None:
         Backend("3070", "http://3070", "ollama", "qwen", roles=["coder", "reviewer"], unavailable_while_process=["ffxiv_dx11.exe"]),
     ]
     unloads: list[str] = []
-    pool = Pool(backends, get=lambda url, **k: Resp(200), post=lambda url, **k: unloads.append(url), processes=lambda: running,
+    pool = Pool(backends, get=lambda url, **k: Resp(200), post=lambda url, **k: unloads.append(url), match=lambda wanted: [w for w in wanted if w in running],
                 clock=clock, on_event=events.append)
     lease = pool.acquire("coder")
     assert lease.backend.name == "p4000"
