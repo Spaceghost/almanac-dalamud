@@ -11,6 +11,20 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="xunit.v3" Version="3.2.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <!-- The reload-leak audit parses the plugin's own sources; it needs a C# parser, not a compiler. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Where the sources live, baked into the test assembly so the audit does not have to guess.
+      ReloadLeakAudit falls back to walking up from the test assembly, and fails loudly if it
+      still finds nothing.
+    -->
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>AlmanacRepoRoot</_Parameter1>
+      <_Parameter2>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../..'))</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Almanac.Core/Almanac.Core.csproj" />
