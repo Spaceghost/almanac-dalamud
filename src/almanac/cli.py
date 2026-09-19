@@ -231,6 +231,137 @@ def cmd_audit(cfg: Config, ns: argparse.Namespace) -> int:
     return 0
 
 
+def _bench_print_task(run: Any) -> None:
+    s = run.score
+    answer = "skip" if s.answer_score is None else f"{s.answer_score:.2f}"
+    ttft = "-" if run.ttft_ms is None else f"{run.ttft_ms:.0f}"
+    tps = "-" if run.tokens_per_s is None else f"{run.tokens_per_s:.1f}"
+    print(f"{run.task_id:22} {s.score:5.2f} {s.tool_score:5.2f} {answer:>6} {s.valid_calls:>3}/{s.total_calls:<3} {ttft:>7} {tps:>7}  {s.error or 'ok'}", flush=True)
+
+
+def _bench_submit(store: Any, run_id: int, doc: dict[str, Any], yes: bool) -> int:
+    import httpx
+
+    from . import bench
+
+    errors = bench.result_errors(doc)
+    if errors:
+        print("result does not conform to results.schema.json, not submitting:\n  " + "\n  ".join(errors[:10]), file=sys.stderr)
+        return 1
+    print(json.dumps(doc, indent=2))
+    url = bench.leaderboard_url()
+    if not yes:
+        if not sys.stdin.isatty():
+            print("not submitted (no terminal to confirm; pass --yes)", file=sys.stderr)
+            return 1
+        if input(f"Submit exactly this JSON to {url}? [y/N] ").strip().lower() != "y":
+            print("not submitted")
+            return 1
+    try:
+        response = bench.submit(doc, url=url)
+    except httpx.HTTPError as exc:
+        print(f"submit failed: {exc.__class__.__name__}", file=sys.stderr)
+        return 1
+    if response.status_code >= 300:
+        print(f"submit rejected: HTTP {response.status_code} {response.text[:300]}", file=sys.stderr)
+        return 1
+    store.mark_submitted(run_id)
+    print(f"submitted run #{run_id} (HTTP {response.status_code})")
+    return 0
+
+
+def cmd_bench(cfg: Config, ns: argparse.Namespace) -> int:
+    import os
+
+    import httpx
+
+    from . import bench
+
+    store = bench.Store(cfg.state_dir / "bench.sqlite")
+    if ns.list:
+        for rid, created, suite, mode, model, score, submitted in store.rows():
+            print(f"#{rid:<5} {created}  {suite:18} {mode:5} {model:32} {score:6.1f}  {'submitted' if submitted else ''}")
+        return 0
+    if ns.run is not None:
+        doc = store.get(ns.run)
+        if doc is None:
+            print(f"no stored run #{ns.run}", file=sys.stderr)
+            return 1
+        if ns.json:
+            Path(ns.json).write_text(json.dumps(doc, indent=2) + "\n")
+        if ns.submit:
+            return _bench_submit(store, ns.run, doc, ns.yes)
+        print(json.dumps(doc, indent=2))
+        return 0
+    if not ns.model:
+        print("--model is required", file=sys.stderr)
+        return 2
+
+    suite = bench.load_suite(ns.suite or bench.DEFAULT_SUITE)
+    tasks = [t for t in (ns.tasks or "").split(",") if t] or None
+    for task_id in tasks or []:
+        suite.task(task_id)
+    mode = "live" if ns.live else "mock"
+    base_url = ns.base_url or str(cfg.section("gateway")["backend"]).rstrip("/") + "/v1"
+    api_key = os.environ.get(ns.api_key_env) if ns.api_key_env else None
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    client = httpx.Client()
+
+    if mode == "live":
+        from .upstream import Upstream, UpstreamError
+
+        upstream = Upstream(name="xivmcp", url=ns.xivmcp_url, token_file=ns.xivmcp_token_file or "", token_env="" if ns.xivmcp_token_file else "XIVMCP_TOKEN")
+        try:
+            available = {t.name for t in upstream.list_tools()}
+        except UpstreamError as exc:
+            print(f"live mode needs XivMcp: {exc}", file=sys.stderr)
+            return 1
+        missing = sorted({n for t in suite.tasks for n in t.get("tools") or []} - available)
+        if missing:
+            print(f"XivMcp does not offer: {', '.join(missing)}", file=sys.stderr)
+            return 1
+        executor = bench.live_executor(upstream)
+    else:
+        executor = bench.mock_executor(suite)
+
+    kind, version = (ns.backend_kind, None) if ns.backend_kind else bench.detect_backend(client, base_url, headers)
+    info = bench.ollama_model_info(client, base_url, ns.model, headers) if kind == "ollama" else {}
+    model: dict[str, Any] = {"name": ns.model}
+    for key in ("family", "params_b"):
+        if key in info:
+            model[key] = info[key]
+    model["quant"] = ns.quant or info.get("quant", "unknown")
+    model["context"] = ns.context if ns.context is not None else int(info.get("context", 0))
+
+    chat = bench.ChatClient(base_url, api_key, client, timeout=ns.timeout)
+    runner = bench.Runner(suite, chat, ns.model, executor, mode, ns.tool_calling)
+    print(f"suite {suite.id} {suite.version}  mode {mode}  backend {kind}  model {ns.model}  quant {model['quant']}  context {model['context']}")
+    print(f"{'task':22} {'score':>5} {'tools':>5} {'answer':>6} {'calls':>7} {'ttft ms':>7} {'tok/s':>7}  error")
+    try:
+        with bench.VramSampler(bench.vram_reader(kind, base_url)) as sampler:
+            outcome = runner.run(tasks, on_task=_bench_print_task)
+    except bench.BackendError as exc:
+        print(f"backend failed: {exc}", file=sys.stderr)
+        return 1
+    backend: dict[str, Any] = {"kind": kind, "version": version}
+    doc = bench.build_result(suite, mode, bench.hardware_facts(), backend, model, outcome, sampler.peak)
+    m = doc["metrics"]
+    print(
+        f"\nscore {m['score']}  success {m['success_rate']:.0%}  tool validity {m['tool_call_validity']:.0%}  "
+        f"quality {m.get('quality', 0):.2f}  ttft {m['ttft_ms']:.0f} ms  {m['tokens_per_s']:.1f} tok/s  "
+        f"peak VRAM {m['peak_vram_mb'] if m['peak_vram_mb'] is not None else '-'} MB  {m['total_s']:.1f} s  "
+        f"tool calling {doc['model']['tool_calling']}"
+    )
+    errors = bench.result_errors(doc)
+    if errors:
+        print("warning: result does not conform to results.schema.json:\n  " + "\n  ".join(errors[:10]), file=sys.stderr)
+    run_id = store.add(doc)
+    print(f"stored as run #{run_id} in bench.sqlite")
+    if ns.json:
+        Path(ns.json).write_text(json.dumps(doc, indent=2) + "\n")
+    return _bench_submit(store, run_id, doc, ns.yes) if ns.submit else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="almanac", description=__doc__)
     parser.add_argument("--config", help="config file (default $ALMANAC_CONFIG or ~/.config/almanac/config.toml)")
@@ -297,6 +428,27 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--on-calendar", required=True, help="systemd OnCalendar=, e.g. daily or 'Mon *-*-* 09:00'")
     p.add_argument("--enable", action="store_true")
     add("audit", cmd_audit, "show the audit log tail").add_argument("-n", type=int, default=20)
+    p = add("bench", cmd_bench, "run the FFXIV model benchmark (benchmark/README.md)")
+    p.add_argument("--suite", help="suite file (default benchmark/suites/ffxiv-core.json)")
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--mock", action="store_true", help="answer tool calls from the suite fixtures (default)")
+    group.add_argument("--live", action="store_true", help="call XivMcp in the running game")
+    p.add_argument("--xivmcp-url", default="http://127.0.0.1:41800/mcp")
+    p.add_argument("--xivmcp-token-file", help="XivMcp bearer token file (default: $XIVMCP_TOKEN)")
+    p.add_argument("--base-url", help="OpenAI-compatible base URL (default: [gateway] backend + /v1)")
+    p.add_argument("--model")
+    p.add_argument("--api-key-env", help="environment variable holding the backend API key")
+    p.add_argument("--backend-kind", choices=["ollama", "lmstudio", "llamacpp", "openai-compatible", "almanac"], help="skip detection")
+    p.add_argument("--tool-calling", choices=["auto", "native", "prompted"], default="auto", help="auto: native, prompted if the backend rejects tools")
+    p.add_argument("--quant")
+    p.add_argument("--context", type=int)
+    p.add_argument("--tasks", help="comma-separated task ids (default: all)")
+    p.add_argument("--timeout", type=float, default=300.0, help="per-request read timeout in seconds")
+    p.add_argument("--json", help="also write the result document to this file")
+    p.add_argument("--submit", action="store_true", help="show the JSON, confirm, then submit it to the leaderboard")
+    p.add_argument("--yes", action="store_true", help="submit without asking")
+    p.add_argument("--run", type=int, help="use stored run N instead of running (print it, or --submit it)")
+    p.add_argument("--list", action="store_true", help="list stored runs")
 
     ns = parser.parse_args(argv)
     level = logging.INFO if ns.command in ("mcp", "gateway") else logging.WARNING
