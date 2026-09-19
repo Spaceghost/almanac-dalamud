@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Almanac.Core/Almanac.Core.csproj" />
+    <Project Path="src/Almanac.Plugin/Almanac.Plugin.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Almanac.Core.Tests/Almanac.Core.Tests.csproj" />
+  </Folder>
+</Solution>
