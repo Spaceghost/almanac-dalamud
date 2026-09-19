@@ -56,9 +56,17 @@ trap 'rm -rf "$STAGE"' EXIT
 rm -rf "$STAGE"
 mkdir -p "$STAGE/Almanac" "$OUT"
 
-# Everything the built plugin needs, minus debug symbols and the reference assemblies
-# Dalamud itself provides (the SDK already keeps those out of the output).
-( cd "$BIN" && find . -type f ! -name '*.pdb' -print0 | while IFS= read -r -d '' f; do
+# Everything the built plugin needs and nothing else: the managed assemblies and the one
+# native SQLite the game's process can actually load. Dalamud provides its own assemblies
+# (the SDK keeps those out of the output), .pdb and .deps.json are for developers, the
+# other runtimes/ are for platforms the game does not run on (they were 45 MB of the
+# first zip), and DalamudPackager leaves its own zip in the output folder.
+( cd "$BIN" && find . -type f -print0 | while IFS= read -r -d '' f; do
+    case "$f" in
+      ./*.deps.json | ./*.runtimeconfig.json | *.pdb | *.zip) continue ;;
+      ./*.dll | ./*.json | ./runtimes/win-x64/native/*) ;;
+      *) continue ;;
+    esac
     mkdir -p "$STAGE/Almanac/$(dirname "$f")"
     cp "$f" "$STAGE/Almanac/$f"
   done )
@@ -72,6 +80,10 @@ rm -f "$OUT/latest.zip" "$OUT/Almanac-$VERSION.zip"
 cp "$OUT/latest.zip" "$OUT/Almanac-$VERSION.zip"
 echo "== $OUT/latest.zip"
 unzip -l "$OUT/latest.zip" | tail -n 3
+# What Dalamud opens the zip for. A missing manifest installs a plugin that cannot load.
+for want in Almanac.dll Almanac.json runtimes/win-x64/native/e_sqlite3.dll; do
+  unzip -l "$OUT/latest.zip" | grep -qF " $want" || { echo "error: $want is not in the zip" >&2; exit 1; }
+done
 
 # The listing: the shipped manifest plus the fields a plugin repository adds.
 CHANNEL=stable
