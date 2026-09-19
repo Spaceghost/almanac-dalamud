@@ -99,7 +99,9 @@ reasoning_effort = "none"            # thinking off: much faster on small models
 # min_free_memory_mb = 0              # >0: coding and test steps wait while free memory is below it
 #
 # [autopilot.local_coder]
-# tool = "aider"                      # aider | codex (Codex CLI with a local provider) | custom argv
+# tool = "codex"                      # codex (Codex CLI with a local provider) | aider | custom argv
+# codex_home = ""                     # default <state>/autopilot/codex; never the owner's ~/.codex
+# extra_args = []                     # appended to the preset
 #
 # [autopilot.repos.my-plugin]
 # path = "~/src/my-plugin"
@@ -112,6 +114,7 @@ reasoning_effort = "none"            # thinking off: much faster on small models
 # kind = "almanac"                    # almanac (gateway) | ollama | openai
 # model = "qwen3.5:9b"
 # coder_model = "qwen3.5:9b"          # optional: a different model for coding sessions
+# context = 32768                     # context this backend serves; the local coder compacts below it
 # roles = ["planner", "coder", "reviewer"]   # give a coding-only box just ["coder", "reviewer"]
 # token_file = "~/.config/almanac/gpu-box.token"
 # priority = 10

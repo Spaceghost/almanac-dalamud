@@ -9,7 +9,10 @@ import pytest
 from autopilot_fakes import Clock, FakeModel, make_settings
 
 from almanac.autopilot.budget import Budget, backoff_seconds
-from almanac.autopilot.coder import CodeResult, classify_limit, local_coder_argv, parse_claude, parse_codex
+from almanac.autopilot.coder import (
+    CODEX_DISABLE_FEATURES, CodeResult, classify_limit, compact_limit, local_coder_argv, local_coder_env,
+    parse_claude, parse_codex,
+)
 from almanac.autopilot.game import is_forbidden, ticket_from
 from almanac.autopilot.git import GitError, GitOps, branch_for
 from almanac.autopilot.planner import Planner, normalize_plan, review_diff, split_for_local
@@ -262,10 +265,21 @@ def test_local_coder_argv_presets(tmp_path: Path) -> None:
     aider = local_coder_argv({"tool": "aider"}, repo, tmp_path, "http://gpu/v1", "qwen-coder", "do it")
     assert aider[:3] == ["aider", "--model", "openai/qwen-coder"] and aider[-1] == "do it"
     assert aider[aider.index("--test-cmd") + 1] == "tests/run.sh"
-    codex = local_coder_argv({"tool": "codex"}, repo, tmp_path, "http://gpu/v1", "qwen-coder", "do it")
+    codex = local_coder_argv({"tool": "codex"}, repo, tmp_path, "http://gpu/v1", "qwen-coder", "do it", 16384)
     assert 'model_providers.autopilot_local.base_url="http://gpu/v1"' in codex and codex[-1] == "do it"
+    # Ollama has no web search and codex knows no local model's context window.
+    assert 'web_search="disabled"' in codex
+    assert "model_context_window=16384" in codex and f"model_auto_compact_token_limit={compact_limit(16384)}" in codex
+    assert [codex[i + 1] for i, a in enumerate(codex) if a == "--disable"] == list(CODEX_DISABLE_FEATURES)
     custom = local_coder_argv({"tool": "custom", "argv": ["my-agent", "--api", "{base_url}", "{prompt}"]}, repo, tmp_path, "http://g/v1", "m", "p")
     assert custom == ["my-agent", "--api", "http://g/v1", "p"]
+
+
+def test_local_coder_env_isolates_codex_from_the_owners_config() -> None:
+    env = local_coder_env("http://gpu/v1", "tok", "/state/codex")
+    assert env["OPENAI_API_KEY"] == "tok" and env["AUTOPILOT_LOCAL_KEY"] == "tok"
+    assert env["CODEX_HOME"] == "/state/codex"
+    assert "CODEX_HOME" not in local_coder_env("http://gpu/v1", "tok")
 
 
 # -- safety helpers ---------------------------------------------------------------------------
