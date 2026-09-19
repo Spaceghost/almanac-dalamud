@@ -1,0 +1,21 @@
+# almanac MCP server (streamable HTTP on [mcp] listen; bearer token required).
+# Installed by deploy/install.sh into ~/.config/systemd/user/.
+[Unit]
+Description=almanac MCP server (knowledge base + tools)
+Documentation=file://%h/.local/share/almanac/README.md
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=ALMANAC_PYTHON=%h/.local/share/almanac/venv/bin/python
+ExecStart=%h/.local/share/almanac/venv/bin/almanac mcp
+# Binding a Tailscale address fails until tailscaled is up; keep retrying.
+Restart=always
+RestartSec=10
+NoNewPrivileges=yes
+UMask=0077
+MemoryMax=400M
+Nice=5
+
+[Install]
+WantedBy=default.target

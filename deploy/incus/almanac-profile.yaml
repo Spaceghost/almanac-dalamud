@@ -1,0 +1,43 @@
+# Incus profile: a system container that runs Ollama on ONE passed-through
+# NVIDIA GPU plus almanac (gateway + MCP). The host needs the NVIDIA driver
+# and nvidia-container-cli (Incus injects the driver libraries with
+# nvidia.runtime). Replace the two REPLACE values, then:
+#   incus profile create almanac <remote>:   (once)
+#   incus profile edit <remote>:almanac < almanac-profile.yaml
+# See deploy/incus/README.md for the full sequence.
+description: almanac + Ollama with one NVIDIA GPU
+config:
+  nvidia.runtime: "true"
+  nvidia.driver.capabilities: compute,utility
+  limits.cpu: "4"
+  limits.memory: 12GiB
+  # Keep it out of the way of other workloads on the host.
+  limits.cpu.priority: "3"
+  cloud-init.user-data: |
+    #cloud-config
+    package_update: true
+    packages: [python3, python3-venv, git, curl, zstd, ca-certificates, openssh-client]
+    users:
+      - name: almanac
+        shell: /bin/bash
+    runcmd:
+      # Official Ollama installer: installs /usr/local/bin/ollama and ollama.service.
+      - [sh, -c, "curl -fsSL https://ollama.com/install.sh | sh"]
+      - [mkdir, -p, /etc/systemd/system/ollama.service.d]
+      - [sh, -c, "printf '[Service]\\nEnvironment=OLLAMA_HOST=127.0.0.1:11434\\nEnvironment=OLLAMA_KEEP_ALIVE=5m\\nEnvironment=OLLAMA_MAX_LOADED_MODELS=1\\nEnvironment=OLLAMA_NUM_PARALLEL=1\\nEnvironment=OLLAMA_CONTEXT_LENGTH=32768\\nEnvironment=OLLAMA_NO_CLOUD=1\\n' > /etc/systemd/system/ollama.service.d/almanac.conf"]
+      - [systemctl, daemon-reload]
+      - [systemctl, restart, ollama]
+      - [loginctl, enable-linger, almanac]
+devices:
+  gpu0:
+    type: gpu
+    gputype: physical
+    pci: "REPLACE-PCI-ADDRESS"        # e.g. 0000:01:00.0 from `nvidia-smi --query-gpu=pci.bus_id --format=csv`
+  mcp:
+    type: proxy
+    listen: tcp:REPLACE-HOST-IP:41880  # host address clients use (e.g. its Tailscale IP)
+    connect: tcp:127.0.0.1:41880
+  gateway:
+    type: proxy
+    listen: tcp:REPLACE-HOST-IP:41881
+    connect: tcp:127.0.0.1:41881
