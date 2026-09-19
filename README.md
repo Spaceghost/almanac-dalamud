@@ -367,7 +367,34 @@ XIVLauncher.Core/Wine). It needs no Python and no almanac engine.
   benchmark's mock tools implement it today; sandboxed WebAssembly tools are
   meant to plug in as another source.
 
-### Install (from source, until it is in a plugin repository)
+### Install (one click, from the plugin repository)
+
+Almanac is published in the author's own third-party plugin repository, next to
+the other FFXIV mods here. In game:
+
+1. `/xlsettings` → **Experimental** → **Custom Plugin Repositories** → paste
+
+   ```
+   https://spacegho.st/mods/ffxiv/plugins.json
+   ```
+
+   → **+** → **Save and Close**.
+2. `/xlplugins` → **All Plugins** → search **Almanac** → **Install**.
+3. Updates arrive like any other plugin's. To take test builds ahead of a
+   release, tick **Testing** on Almanac's entry in `/xlplugins`; that opts this
+   one plugin in, and nothing else.
+
+The page at <https://spacegho.st/mods/ffxiv/plugins/> says the same thing with
+screenshots' worth of detail, and lists every mod the repository carries.
+
+This is a third-party repository, not the official Dalamud one: Dalamud will
+warn you that nobody but the author has reviewed it, which is true.
+
+### Install (build it yourself, the dev plugin path)
+
+You do not need the repository above. Building it yourself takes a .NET SDK and
+about a minute, and is the same path the author develops on — good for friends
+who want to read the code first, and for anyone who wants to change it.
 
 1. Install the .NET 10 SDK, then build:
    `dotnet build dalamud/Almanac.Dalamud.slnx -c Release`. The plugin lands in
@@ -384,6 +411,23 @@ XIVLauncher.Core/Wine). It needs no Python and no almanac engine.
    **Next**; **3** pick the model, press **Test tool calling** → **Next**;
    **4** keep *Connect automatically through XivMcp*, press **Test the
    connection** → **Finish and open the chat**.
+
+Notes for that path:
+
+- The build needs Dalamud's reference assemblies. If XIVLauncher is installed
+  they are already there (Linux `~/.xlcore/dalamud/Hooks/dev/`, Windows
+  `%APPDATA%\XIVLauncher\addon\Hooks\dev\`) and nothing else is needed. On a
+  machine without them — a build box, a container, CI — run
+  `dalamud/tools/fetch-dalamud.sh`, which downloads goatcorp's public
+  distribution, and build with `DALAMUD_HOME` pointing at it.
+- **Dev Plugin Locations** takes the `Almanac.dll` path or the folder holding
+  it; the folder must also contain `Almanac.json` and the DLLs next to it, so
+  point it at the build output folder, not at a copy of the DLL alone.
+- Rebuilt while the game was running? `/xlplugins` → **Dev Tools** →
+  **Installed Dev Plugins** → the reload arrow on **Almanac**; no relaunch.
+- `dalamud/tools/package.sh` builds the same `latest.zip` the releases carry,
+  if you would rather install it as a normal plugin from a file.
+- The same steps work from a Windows checkout; only the paths differ.
 
 Development: `dotnet test dalamud/tests/Almanac.Core.Tests` runs the non-UI
 logic (model client, MCP client, agent loop, scorer against the shared

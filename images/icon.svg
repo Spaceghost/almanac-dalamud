@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>Almanac for FFXIV</title>
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="36%" r="78%">
+      <stop offset="0" stop-color="#20305f"/>
+      <stop offset="0.55" stop-color="#101b3a"/>
+      <stop offset="1" stop-color="#050a18"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6e2a4"/>
+      <stop offset="0.5" stop-color="#c99a4b"/>
+      <stop offset="1" stop-color="#8a6128"/>
+    </linearGradient>
+    <linearGradient id="pageL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fdf6e3"/>
+      <stop offset="1" stop-color="#d8c9a6"/>
+    </linearGradient>
+    <linearGradient id="pageR" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7edd6"/>
+      <stop offset="1" stop-color="#cbb992"/>
+    </linearGradient>
+    <linearGradient id="crystalL" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#bff4ff"/>
+      <stop offset="1" stop-color="#2c8fd6"/>
+    </linearGradient>
+    <linearGradient id="crystalR" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5cc8f5"/>
+      <stop offset="1" stop-color="#16508f"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#7fdcff" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#7fdcff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="7" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <clipPath id="frame"><rect x="0" y="0" width="512" height="512" rx="104"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="512" height="512" fill="url(#bg)"/>
+    <!-- stars -->
+    <g fill="#cfe8ff">
+      <circle cx="78" cy="88" r="3"/><circle cx="130" cy="58" r="2"/><circle cx="424" cy="80" r="2.5"/>
+      <circle cx="448" cy="164" r="2"/><circle cx="64" cy="192" r="2"/><circle cx="386" cy="42" r="1.8"/>
+      <circle cx="248" cy="40" r="1.6"/><circle cx="160" cy="132" r="1.6"/>
+    </g>
+
+    <!-- the crystal the answers come from, in its gold aetheryte ring -->
+    <circle cx="256" cy="150" r="118" fill="url(#halo)"/>
+    <path d="M96 158 A164 30 0 0 1 416 158" fill="none" stroke="url(#gold)" stroke-width="9" opacity="0.9"/>
+    <g filter="url(#glow)">
+      <path d="M256 62 L296 132 L256 196 Z" fill="url(#crystalR)"/>
+      <path d="M256 62 L216 132 L256 196 Z" fill="url(#crystalL)"/>
+    </g>
+
+    <!-- the open almanac -->
+    <g>
+      <path d="M256 236 L86 272 L86 404 L256 372 Z" fill="url(#pageL)"/>
+      <path d="M256 236 L426 272 L426 404 L256 372 Z" fill="url(#pageR)"/>
+      <path d="M256 236 L86 272 L86 404 L256 372 Z" fill="none" stroke="url(#gold)" stroke-width="7"/>
+      <path d="M256 236 L426 272 L426 404 L256 372 Z" fill="none" stroke="url(#gold)" stroke-width="7"/>
+      <path d="M256 236 L256 372" stroke="#8a6128" stroke-width="6"/>
+      <!-- lines of text, the newest still glowing -->
+      <g stroke="#7a6a4a" stroke-width="7" stroke-linecap="round">
+        <path d="M118 300 L226 278"/><path d="M118 328 L226 306"/><path d="M118 356 L196 341"/>
+        <path d="M286 278 L394 300"/><path d="M286 306 L394 328"/>
+      </g>
+      <path d="M286 334 L356 348" stroke="#5cc8f5" stroke-width="7" stroke-linecap="round" filter="url(#glow)"/>
+    </g>
+
+    <!-- the model's cursor, answering -->
+    <rect x="368" y="338" width="14" height="24" rx="3" fill="#bff4ff" filter="url(#glow)"/>
+  </g>
+</svg>

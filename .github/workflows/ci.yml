@@ -1,0 +1,56 @@
+# Every push and pull request: the Dalamud plugin's manifest check, build, tests and
+# packaging. GitHub-hosted runners only; nothing here touches a machine of the author's,
+# and nothing here needs the game. The Python engine has its own tests (`make test`,
+# README) which are not wired up here yet.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dalamud:
+    name: Dalamud plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DALAMUD_HOME: ${{ github.workspace }}/.dalamud
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Check the plugin manifest
+        run: dalamud/tools/check-manifest.py
+
+      - name: Fetch the Dalamud reference assemblies
+        run: dalamud/tools/fetch-dalamud.sh
+
+      - name: Test
+        run: dotnet test dalamud/tests/Almanac.Core.Tests -c Release
+
+      - name: Build
+        run: dotnet build dalamud/src/Almanac.Plugin/Almanac.Plugin.csproj -c Release
+
+      - name: Package (the release path, run on every push)
+        env:
+          OUT: ${{ runner.temp }}/release
+        run: dalamud/tools/package.sh
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: almanac-plugin-${{ github.sha }}
+          path: ${{ runner.temp }}/release
+          if-no-files-found: error
+          retention-days: 14

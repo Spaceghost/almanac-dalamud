@@ -1,8 +1,19 @@
 {
   "Author": "Johnneylee Jack Rollins",
   "Name": "Almanac",
+  "InternalName": "Almanac",
+  "AssemblyVersion": "0.1.0.0",
   "Punchline": "Talk to a local AI model in game, with XivMcp's tools.",
   "Description": "Connects a model running on your own PC (Ollama, LM Studio, llama.cpp or any OpenAI-compatible server) to the game through XivMcp. Setup wizard with GPU-aware model recommendations, an in-game chat with threads and streaming, and a benchmark you can share with the community leaderboard. No cloud, no Python. Requires the XivMcp plugin for game tools.",
+  "ApplicableVersion": "any",
+  "DalamudApiLevel": 15,
+  "IconUrl": "https://raw.githubusercontent.com/Spaceghost/almanac-dalamud/main/images/icon.png",
+  "ImageUrls": [ "https://raw.githubusercontent.com/Spaceghost/almanac-dalamud/main/images/banner.png" ],
   "Tags": ["ai", "llm", "local", "mcp", "chat", "utility"],
-  "RepoUrl": "https://github.com/Spaceghost/almanac-dalamud"
+  "RepoUrl": "https://github.com/Spaceghost/almanac-dalamud",
+  "LoadRequiredState": 0,
+  "LoadSync": false,
+  "LoadPriority": 0,
+  "CanUnloadAsync": false,
+  "AcceptsFeedback": false
 }
