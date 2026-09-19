@@ -112,6 +112,11 @@ almanac tool host_status host=example-host
 almanac tool incus_snapshot remote=srv instance=web snapshot=pre-upgrade   # shows the plan, asks y/N
 almanac ask "is anything failing on example-server?"
 almanac chat                           # interactive; /help, /tools, /actions on|off, /quit
+almanac ask --new-thread "which retainers are full?"   # saved as a thread; its id is printed
+almanac ask --continue "and the second one?"           # a follow-up in the latest thread
+almanac ask --thread ID --stream-json -- "..."         # JSON lines, for programs (see below)
+almanac chat --continue                # the REPL, saving every turn in the thread
+almanac threads [list|show ID|rm ID] [--json]
 almanac run daily-health-check         # a runbook, with the local model
 almanac schedule daily-health-check --on-calendar daily --enable   # systemd user timer
 almanac audit                          # what ran, who asked, what was declined
@@ -121,6 +126,23 @@ almanac model status | unload
 `ask`, `chat` and `run` use only the local model. Scheduled runs that find
 memory tight exit 75, which the unit treats as "skipped, try next time".
 Transcripts are saved under `~/.local/state/almanac/runs/`.
+
+**Threads.** With `--thread ID` (created when missing), `--continue` (the
+most recent thread) or `--new-thread`, `ask` and `chat` keep the conversation
+under `~/.local/state/almanac/threads/<id>.json` (mode 0600), so a follow-up
+reaches the model with what was said before. Only the conversation is kept;
+the system prompt and tool list are rebuilt every turn. What is sent back is
+trimmed to `[agent] context_tokens` (default 8192): whole turns, newest first,
+with old tool output shortened. Without a thread option `ask` stays one-shot.
+
+**`--stream-json`** prints one ASCII JSON object per line and never prompts
+(change tools stay unapproved; game actions still need the in-game
+confirmation): `thread` {id, title, new, turns}, `note` {text}, `text` {text}
+as the answer streams, `tool` {name, args}, `result` {name, summary, lines},
+then `done` {answer, thread, title} or `error` {message, code}.
+`almanac threads --json` lists `thread_info` lines; `threads show ID --json`
+replays a thread as `message` {role, text} and `tool` lines; both end with
+`end`.
 
 ## Connect Claude Code
 
@@ -318,12 +340,14 @@ the local agent) returns the state the gateway last published to
   box, e.g. `/term send almanac ask "which retainers have full inventories?"`.
   Answers stream into that terminal; progress shows on the agent board. A
   terminal profile whose command is `almanac chat` makes it one keystroke.
+  Ghostty for Dalamud's `/ask` panel runs `almanac ask --stream-json` in a
+  thread and shows the answer as chat bubbles, with follow-ups.
 
 ## Layout
 
 ```
 src/almanac/      config, kb (index), tools (TOML runner), service (confirm+audit),
-                  mcp_server, gateway, codex_compat, guard, residency, agent, chat,
+                  mcp_server, gateway, codex_compat, guard, residency, agent, chat, threads,
                   upstream, cli
 examples/         knowledge/ and tools/ to copy from
 deploy/           install.sh, systemd user units, Quadlet, Incus profile

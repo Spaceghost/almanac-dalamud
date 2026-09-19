@@ -134,13 +134,21 @@ def cmd_tool(cfg: Config, ns: argparse.Namespace) -> int:
 def cmd_ask(cfg: Config, ns: argparse.Namespace) -> int:
     from .chat import run_ask
 
-    return run_ask(Almanac(cfg), " ".join(ns.task), ns.model, ns.allow_change, ns.allow_game_actions, ns.verbose)
+    return run_ask(Almanac(cfg), " ".join(ns.task), ns.model, ns.allow_change, ns.allow_game_actions, ns.verbose,
+                   thread_id=ns.thread, continue_last=ns.continue_last, new_thread=ns.new_thread, stream_json=ns.stream_json)
 
 
 def cmd_chat(cfg: Config, ns: argparse.Namespace) -> int:
     from .chat import run_chat
 
-    return run_chat(Almanac(cfg), ns.model, ns.allow_change, ns.allow_game_actions)
+    return run_chat(Almanac(cfg), ns.model, ns.allow_change, ns.allow_game_actions,
+                    thread_id=ns.thread, continue_last=ns.continue_last, new_thread=ns.new_thread)
+
+
+def cmd_threads(cfg: Config, ns: argparse.Namespace) -> int:
+    from .chat import run_threads
+
+    return run_threads(Almanac(cfg), ns.action, ns.id, ns.json, ns.n)
 
 
 def cmd_run(cfg: Config, ns: argparse.Namespace) -> int:
@@ -267,6 +275,18 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--allow-game-actions", action="store_true", help="offer companion action/chat tools (the game asks to confirm)")
         p.add_argument("--model")
         p.add_argument("-v", "--verbose", action="store_true")
+        if name != "run":
+            which = p.add_mutually_exclusive_group()
+            which.add_argument("--thread", metavar="ID", help="continue thread ID (created when missing) and save this turn in it")
+            which.add_argument("--continue", dest="continue_last", action="store_true", help="continue the most recent thread")
+            which.add_argument("--new-thread", action="store_true", help="start a new saved thread (its id is printed)")
+        if name == "ask":
+            p.add_argument("--stream-json", action="store_true", help="print JSON lines (thread, text, tool, result, done, error) for programs")
+    p = add("threads", cmd_threads, "list, show or delete saved conversation threads")
+    p.add_argument("action", choices=["list", "show", "rm"], nargs="?", default="list")
+    p.add_argument("id", nargs="?")
+    p.add_argument("--json", action="store_true", help="JSON lines, as ask --stream-json")
+    p.add_argument("-n", type=int, default=50, help="list at most this many (newest first)")
     p = add("mcp", cmd_mcp, "serve MCP (HTTP by default)")
     p.add_argument("--stdio", action="store_true")
     p.add_argument("--listen", action="append")

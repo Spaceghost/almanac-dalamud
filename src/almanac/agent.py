@@ -128,6 +128,8 @@ class Agent:
         self.temperature = float(agent_cfg.get("temperature", 0.2))
         # OpenAI reasoning_effort; "none" turns thinking off (much faster on small models).
         self.reasoning = str(agent_cfg.get("reasoning_effort", "none"))
+        # The model's context window, for trimming thread history (threads.py).
+        self.context_tokens = int(agent_cfg.get("context_tokens", 8192))
         self.allow_change = allow_change
         self.preapproved = set(preapproved or [])
         self.approver = approver
@@ -193,6 +195,19 @@ class Agent:
         if context:
             system += "\n\n" + context
         self.messages = [{"role": "system", "content": system}]
+
+    def resume(self, history: list[dict[str, Any]], context: str = "") -> None:
+        """Start a conversation that continues `history` (earlier turns of a thread)."""
+        self.start(context)
+        self.messages += [dict(m) for m in history]
+
+    def history_budget(self) -> int:
+        """Characters of earlier turns that fit beside the system prompt, the
+        tool list and room for the answer (about four characters a token)."""
+        if not self.messages:
+            self.start()
+        fixed = len(json.dumps(self.messages[:1], ensure_ascii=False)) + len(json.dumps(self.functions(), ensure_ascii=False))
+        return max(2000, self.context_tokens * 4 - fixed - 1024 * 4)
 
     def turn(self, user_text: str, on_text: TextSink | None = None, on_event: EventSink | None = None, transcript: Transcript | None = None) -> str:
         """One user message -> tool calls as needed -> final answer (streamed to on_text)."""
