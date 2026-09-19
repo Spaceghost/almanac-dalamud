@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spacegho.st/mods/ffxiv/almanac/schema/recommendations.v1.json",
+  "title": "almanac-dalamud model recommendations (v1)",
+  "description": "Served at GET /mods/ffxiv/almanac/recommendations.json. The plugin bundles a fallback copy. Tiers are matched by the player's free/dedicated VRAM: pick the first tier with min_vram_mb <= vram < max_vram_mb (max null = unbounded).",
+  "type": "object",
+  "required": ["schema_version", "generated_at", "suite_version", "tiers"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "suite_version": { "type": "string" },
+    "source": { "enum": ["leaderboard", "bundled"] },
+    "tiers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "min_vram_mb", "max_vram_mb", "models"],
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "min_vram_mb": { "type": "integer", "minimum": 0 },
+          "max_vram_mb": { "type": ["integer", "null"] },
+          "models": {
+            "type": "array",
+            "description": "Best first.",
+            "items": {
+              "type": "object",
+              "required": ["name", "tool_calling"],
+              "properties": {
+                "name": { "type": "string", "description": "Display name" },
+                "ollama": { "type": ["string", "null"], "description": "ollama pull id" },
+                "lmstudio": { "type": ["string", "null"], "description": "LM Studio / Hugging Face GGUF id" },
+                "quant": { "type": "string" },
+                "context": { "type": "integer" },
+                "vram_mb": { "type": ["integer", "null"], "description": "Typical peak VRAM at that context" },
+                "tool_calling": { "enum": ["native", "prompted", "none"] },
+                "score": { "type": ["number", "null"] },
+                "tokens_per_s": { "type": ["number", "null"] },
+                "samples": { "type": "integer", "minimum": 0 },
+                "notes": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
