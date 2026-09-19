@@ -132,30 +132,25 @@ def cmd_tool(cfg: Config, ns: argparse.Namespace) -> int:
 
 
 def cmd_ask(cfg: Config, ns: argparse.Namespace) -> int:
-    from .agent import Agent, save_run
+    from .chat import run_ask
 
-    alm = Almanac(cfg)
-    try:
-        transcript = Agent(alm, model=ns.model, allow_change=ns.allow_change).run(" ".join(ns.task))
-    except RuntimeError as exc:  # guard refused: memory tight etc.
-        print(str(exc), file=sys.stderr)
-        return 75
-    path = save_run(alm, "ask", transcript)
-    if ns.verbose:
-        print("\n\n".join(transcript.steps), file=sys.stderr)
-    print(transcript.answer)
-    print(f"\n(transcript: {path})", file=sys.stderr)
-    return 0
+    return run_ask(Almanac(cfg), " ".join(ns.task), ns.model, ns.allow_change, ns.allow_game_actions, ns.verbose)
+
+
+def cmd_chat(cfg: Config, ns: argparse.Namespace) -> int:
+    from .chat import run_chat
+
+    return run_chat(Almanac(cfg), ns.model, ns.allow_change, ns.allow_game_actions)
 
 
 def cmd_run(cfg: Config, ns: argparse.Namespace) -> int:
-    from .agent import runbook_agent, save_run
+    from .agent import GuardRefused, runbook_agent, save_run
 
     alm = Almanac(cfg)
-    agent, text = runbook_agent(alm, ns.runbook, ns.allow_change, model=ns.model)
+    agent, text = runbook_agent(alm, ns.runbook, ns.allow_change, model=ns.model, allow_game_actions=ns.allow_game_actions)
     try:
         transcript = agent.run("Carry out this runbook now.", context=text)
-    except RuntimeError as exc:  # guard refused: memory tight etc.
+    except GuardRefused as exc:
         print(str(exc), file=sys.stderr)
         return 75  # EX_TEMPFAIL: the timer simply tries again next time
     path = save_run(alm, Path(ns.runbook).stem, transcript)
@@ -260,10 +255,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("name")
     p.add_argument("args", nargs="*")
     p.add_argument("--yes", action="store_true", help="approve a change/destructive plan without prompting")
-    for name, func, text in (("ask", cmd_ask, "ask the local model to do a task"), ("run", cmd_run, "run a runbook with the local model")):
+    for name, func, text in (
+        ("ask", cmd_ask, "ask the local model to do a task (one shot)"),
+        ("run", cmd_run, "run a runbook with the local model"),
+        ("chat", cmd_chat, "interactive chat with the local model"),
+    ):
         p = add(name, func, text)
-        p.add_argument("task" if name == "ask" else "runbook", nargs="+" if name == "ask" else None)
+        if name != "chat":
+            p.add_argument("task" if name == "ask" else "runbook", nargs="+" if name == "ask" else None)
         p.add_argument("--allow-change", action="store_true", help="offer change tools (each still needs approval)")
+        p.add_argument("--allow-game-actions", action="store_true", help="offer companion action/chat tools (the game asks to confirm)")
         p.add_argument("--model")
         p.add_argument("-v", "--verbose", action="store_true")
     p = add("mcp", cmd_mcp, "serve MCP (HTTP by default)")
@@ -278,7 +279,9 @@ def main(argv: list[str] | None = None) -> int:
     add("audit", cmd_audit, "show the audit log tail").add_argument("-n", type=int, default=20)
 
     ns = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s", stream=sys.stderr)
+    level = logging.INFO if ns.command in ("mcp", "gateway") else logging.WARNING
+    logging.basicConfig(level=level, format="%(asctime)s %(name)s %(levelname)s %(message)s", stream=sys.stderr)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     return int(ns.func(Config.load(ns.config), ns))
 
 
