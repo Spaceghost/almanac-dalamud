@@ -168,13 +168,13 @@ It works from any machine that has almanac, the config and the token files.
 | command | what it does |
 | --- | --- |
 | `ai status` | every configured backend: GPU, model, context, tok/s from a 64-token probe, and whether it is down, busy, loading or free. `*` marks the one a session would use. `--no-probe` for health only, `--json` for programs |
-| `ai code [path]` | Codex CLI in that directory on the local model. `-p "task"` does one task and exits |
+| `ai code [path]` | coding session in that directory on the local model: Claude Code in bare mode. `--tool codex` for the Codex CLI instead; `-p "task"` does one task and exits, with either |
 | `ai chat` | plain chat, no tools. `/new` clears it, `/quit` leaves |
 | `ai ask "..."` | one question. Piped text is appended; the banner goes to stderr, so `ai ask -q ... > out.txt` is clean |
 | `ai use NAME` / `ai use auto` | pin a backend on this machine, or go back to automatic |
 | `ai webui` | the address of your Open WebUI, for chat in a browser or on a phone (`[local] webui_url`) |
 | `ai limits` | the expectations below |
-| `ai claude [path]` | Claude Code itself on the local model. Opt-in: see below |
+| `ai claude [path]` | the same as `ai code --tool claude` (kept from when it was opt-in) |
 
 With no pin, the choice is: up, then free before busy, then `priority`, then
 speed. `-b NAME` picks a backend for one run. When the pinned backend is down
@@ -193,12 +193,33 @@ What to expect (a ~9B local model is not Claude):
             every diff, and keep the big jobs for when Claude is back
 ```
 
-`ai code` does not re-derive anything: it is autopilot's `LOCAL_PRESETS["codex"]`
-([Local coding sessions](#local-coding-sessions)) with `exec --json` taken off
-for a person. So web search is off, the context window is declared, the tool
-list is short, the sandbox is `workspace-write` with no approvals, and
-`CODEX_HOME` is `<state>/local/codex-home`, never your `~/.codex`. Extra Codex
-options go after the path: `ai code . -- --search`.
+`ai code` starts **Claude Code** unless told otherwise, because on the same
+tasks it was at least as good as Codex and quicker
+([the comparison](#claude-code-on-the-local-model)). Choose per run with
+`ai code --tool codex`, or for good with
+
+```toml
+[local]
+coder = "codex"      # or "claude" (the default)
+```
+
+When the chosen tool is not installed the other one is used, and one line says
+so. Extra options for the tool go after the path: `ai code . -- --verbose`.
+
+- **claude**: `claude --bare` with `CLAUDE_CONFIG_DIR=<state>/local/claude-config`,
+  never your `~/.claude`, and your cloud login is taken out of its environment.
+  Bare means no plugins, MCP servers, hooks, `CLAUDE.md` or memory, and three
+  tools; that is what leaves the 32k context free. Thinking is off
+  (`MAX_THINKING_TOKENS=0`), which was a little quicker over the six tasks below
+  and passed the same six; set `MAX_THINKING_TOKENS` yourself to turn it back on. With `-p` it runs headless: edits are accepted,
+  and `sudo`, `git push`, `gh`, `ssh` and the like are denied as autopilot
+  denies them, but there is **no sandbox** around it.
+- **codex**: autopilot's `LOCAL_PRESETS["codex"]`
+  ([Local coding sessions](#local-coding-sessions)) with `exec --json` taken off
+  for a person. Web search is off, the context window is declared, the tool
+  list is short, the sandbox is `workspace-write` with no approvals and no
+  network, and `CODEX_HOME` is `<state>/local/codex-home`, never your `~/.codex`.
+  Pick it when you want the session fenced in.
 
 ### Backends
 
@@ -245,6 +266,35 @@ time. That is four tiny tasks, not an evaluation: nothing larger than a
 one-file change was tried, and tool-call fidelity of a 9B model over a long
 session is exactly where it would be expected to fail. `ai code` has more
 mileage. Pointing your everyday `claude` at the gateway is not recommended.
+
+
+### Claude or Codex on the local model
+
+Six tasks, each a failing or missing test in a scratch repo that had to end green,
+run against the fedora P4000 (qwen3.5:9b, 32k). Both tools passed all six; the
+numbers are seconds, and "bad calls" counts tool calls the model got wrong.
+
+| Task | Claude | Codex |
+| --- | --- | --- |
+| one-line fix | 19 | 44 |
+| add a function and its tests | 47 | 77 |
+| empty-sequence bug | 21 | 226 |
+| two-file change | 36 | 51 |
+| run the tests and fix what fails | 104 | 75 |
+| add a CLI flag and a test | 75 | 45 |
+| **total** | **302** | **518** |
+| bad calls | 3 | 3 |
+
+Claude is the default on that: same six passed, about 40% less wall time, and it
+never met a tool it could not call (Codex asks for `apply_patch`, which is not
+registered for a model without catalogue metadata, and recovers by writing the file
+from the shell). Codex wins on two of the six, so it is one flag away
+(`ai code --tool codex`). An earlier pass had both tools slower and noisier because
+an interactive session was using the same GPU; these are the quiet numbers.
+
+Claude bare also runs inside autopilot's bubblewrap profile: two of the tasks were
+re-run there and passed (20s, 52s) with the sandbox holding — no `~/.config/almanac`,
+no `~/.ssh`, and the home directory read-only.
 
 ## Connect Claude Code
 
