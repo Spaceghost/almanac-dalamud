@@ -394,7 +394,8 @@ def release(c: dict[str, str], kind: str, base: str | None, headline: str | None
         raise Fail("not on master")
     if run("git", "status", "--porcelain"):
         raise Fail("the working tree is not clean")
-    run("git", "fetch", "--quiet", "--tags", "origin", "master")
+    # release tags only: the floating `testing` tag moves, and a plain --tags trips on it
+    run("git", "fetch", "--quiet", "--no-tags", "origin", "master", "refs/tags/v*:refs/tags/v*")
     head = run("git", "rev-parse", "HEAD")
     if head != run("git", "rev-parse", "origin/master"):
         raise Fail("master and origin/master differ: pull or push first")
