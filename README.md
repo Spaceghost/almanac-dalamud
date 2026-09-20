@@ -493,6 +493,38 @@ benchmark/        suite, scoring rules, schemas, bundled recommendations, scorin
 
 Development: `python3 -m venv .venv && .venv/bin/pip install -e '.[test]' && .venv/bin/pytest`.
 
+## Changelog
+
+`changelog.json` at the top of the repository is the changelog. It is the
+single source of truth for both places a user reads it:
+
+- **In game** — the plugin embeds it (`Almanac.Core.Changelog`) and the
+  Settings window shows it under **What's new**.
+- **[CHANGELOG.md](CHANGELOG.md)** — generated from it:
+
+  ```sh
+  tools/changelog.py           # rewrite CHANGELOG.md from changelog.json
+  tools/changelog.py --check   # what CI runs: fails, with a diff, on drift
+  ```
+
+The convention, and it is not optional: **every change a user can see adds or
+edits its entry in `changelog.json` in the same commit as the change**, and
+regenerates `CHANGELOG.md`. Never edit `CHANGELOG.md` by hand. CI runs the
+check on every push, and `tests/test_changelog.py` runs it under pytest.
+
+A status word means exactly the same thing here as it does in Ghostty for
+FFXIV's changelog, and nothing more:
+
+| Status | Shown | Means |
+| --- | --- | --- |
+| `next` | SOON | still being built; not merged. |
+| `beta` | BETA | merged, but **not yet verified** where it has to run — in game, or against a real model server. |
+| `new` / `fix` | NEW / FIX | in a numbered release: seen working. |
+
+An entry keeps its `beta` until the thing it describes has actually been
+observed working; say what is unverified in the entry itself, the way
+"Untested" below does, rather than writing around it.
+
 ## Roadmap
 
 - `feature/autopilot`: an overnight loop that plans with the local model pool

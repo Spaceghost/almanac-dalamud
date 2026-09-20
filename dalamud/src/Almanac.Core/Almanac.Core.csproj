@@ -11,6 +11,8 @@
     <!-- Shared with the Python engine byte for byte; the suite hash is over these bytes. -->
     <EmbeddedResource Include="../../../benchmark/suites/ffxiv-core.json" LogicalName="Almanac.Core.suites.ffxiv-core.json" />
     <EmbeddedResource Include="../../../benchmark/recommendations.json" LogicalName="Almanac.Core.recommendations.json" />
+    <!-- The changelog players read in What's new; CHANGELOG.md is rendered from the same file. -->
+    <EmbeddedResource Include="../../../changelog.json" LogicalName="Almanac.Core.changelog.json" />
     <InternalsVisibleTo Include="Almanac.Core.Tests" />
   </ItemGroup>
 </Project>

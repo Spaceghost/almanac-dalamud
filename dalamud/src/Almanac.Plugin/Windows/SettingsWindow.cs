@@ -1,4 +1,5 @@
 using System.Numerics;
+using Almanac.Core;
 using Almanac.Core.Agent;
 using Almanac.Core.Storage;
 using Almanac.Core.Tools;
@@ -13,6 +14,9 @@ namespace Almanac.Plugin.Windows;
 public sealed class SettingsWindow : Window
 {
     private static readonly string[] ToolCallingOptions = ["auto", "native", "prompted", "none"];
+
+    private static Changelog? changelog;
+    private static string? changelogError;
 
     private readonly Plugin plugin;
     private readonly Engine engine;
@@ -34,6 +38,9 @@ public sealed class SettingsWindow : Window
 
         if (ImGui.Button("Run the setup wizard"))
             plugin.OpenSetup();
+
+        Section("What's new");
+        DrawChangelog();
 
         Section("Model");
         var almanac = s.Engine == AlmanacSettings.EngineAlmanac;
@@ -140,6 +147,63 @@ public sealed class SettingsWindow : Window
 
         if (changed)
             plugin.SaveSettings();
+    }
+
+    /// <summary>
+    /// The changelog, straight from changelog.json (embedded in Almanac.Core, and the same file
+    /// CHANGELOG.md is rendered from). Read once; a plugin reload is what picks up a new build.
+    /// </summary>
+    private static void DrawChangelog()
+    {
+        if (changelog is null && changelogError is null)
+        {
+            try
+            {
+                changelog = Changelog.Bundled();
+            }
+            catch (Exception ex)
+            {
+                changelogError = ex.Message;
+            }
+        }
+
+        if (changelog is null)
+        {
+            ImGui.TextDisabled($"The changelog could not be read: {changelogError}");
+            return;
+        }
+
+        for (var i = 0; i < changelog.Releases.Count; i++)
+        {
+            var release = changelog.Releases[i];
+            var flags = i == 0 ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None;
+            if (!ImGui.CollapsingHeader($"{release.Heading}###changelog{i}", flags))
+                continue;
+
+            Wrapped(release.Blurb, ImGuiColors.DalamudGrey);
+            foreach (var item in release.Items)
+                Wrapped($"{Changelog.Label(item.Status)}   {item.Text}", StatusColour(item.Status));
+
+            ImGui.Spacing();
+        }
+    }
+
+    /// <summary>NEW and FIX are in a release; BETA is merged but unverified in game; SOON is still being built.</summary>
+    private static Vector4 StatusColour(string status) => status switch
+    {
+        "new" => ImGuiColors.HealerGreen,
+        "fix" => ImGuiColors.DalamudOrange,
+        "beta" => ImGuiColors.TankBlue,
+        _ => ImGuiColors.DalamudGrey,
+    };
+
+    private static void Wrapped(string text, Vector4 colour)
+    {
+        if (text.Length == 0)
+            return;
+        ImGui.PushStyleColor(ImGuiCol.Text, colour);
+        ImGui.TextWrapped(text);
+        ImGui.PopStyleColor();
     }
 
     private static void Section(string title)
