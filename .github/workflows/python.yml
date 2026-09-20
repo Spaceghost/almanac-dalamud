@@ -1,0 +1,65 @@
+# The Python engine's battery, on every push and pull request to master and
+# weekly: ruff, mypy, bandit, pip-audit, pytest with a coverage floor. Each
+# check is one matrix row: a row in the job summary, one issue (label
+# quality-<kind>) kept up to date on master, logs uploaded. GitHub-hosted
+# runners; a pull request never touches issues.
+name: Python
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: '7 9 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: [ruff, mypy, bandit, pip-audit, coverage]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Install
+        run: |
+          python -m pip install -q -U pip
+          python -m pip install -q -e ".[test]" ruff mypy bandit pip-audit pytest-cov
+      - name: ${{ matrix.kind }}
+        id: check
+        run: |
+          mkdir -p build
+          set -o pipefail
+          tools/ci/python-check.sh "${{ matrix.kind }}" 2>&1 | tee "build/check-python-${{ matrix.kind }}.log"
+      - name: Report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: tools/ci/report-issue.sh "python-${{ matrix.kind }}" "${{ steps.check.outcome == 'success' && 'pass' || 'fail' }}" "build/check-python-${{ matrix.kind }}.log"
+      - name: Upload the log and the coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-${{ matrix.kind }}-${{ github.run_id }}
+          path: |
+            build/check-*.log
+            build/coverage.xml
+          if-no-files-found: ignore
