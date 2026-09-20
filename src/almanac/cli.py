@@ -239,7 +239,7 @@ def _bench_print_task(run: Any) -> None:
     print(f"{run.task_id:22} {s.score:5.2f} {s.tool_score:5.2f} {answer:>6} {s.valid_calls:>3}/{s.total_calls:<3} {ttft:>7} {tps:>7}  {s.error or 'ok'}", flush=True)
 
 
-def _bench_submit(store: Any, run_id: int, doc: dict[str, Any], yes: bool) -> int:
+def _bench_submit(store: Any, run_id: int, doc: dict[str, Any], yes: bool, token_path: Path) -> int:
     import httpx
 
     from . import bench
@@ -258,12 +258,18 @@ def _bench_submit(store: Any, run_id: int, doc: dict[str, Any], yes: bool) -> in
             print("not submitted")
             return 1
     try:
-        response = bench.submit(doc, url=url)
+        response = bench.submit_linked(doc, token_path, url=url)
+    except bench.LinkError as exc:
+        print(f"not signed in, not submitted: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("not signed in, not submitted", file=sys.stderr)
+        return 1
     except httpx.HTTPError as exc:
         print(f"submit failed: {exc.__class__.__name__}", file=sys.stderr)
         return 1
     if response.status_code >= 300:
-        print(f"submit rejected: HTTP {response.status_code} {response.text[:300]}", file=sys.stderr)
+        print(f"submit rejected: HTTP {response.status_code}: {bench.server_message(response)[1]}", file=sys.stderr)
         return 1
     store.mark_submitted(run_id)
     print(f"submitted run #{run_id} (HTTP {response.status_code})")
@@ -277,6 +283,10 @@ def cmd_bench(cfg: Config, ns: argparse.Namespace) -> int:
 
     from . import bench
 
+    token_path = cfg.state_dir / bench.LINK_TOKEN_FILE
+    if ns.unlink:
+        print("signed out: the leaderboard token is revoked and deleted" if bench.unlink(token_path) else "not signed in")
+        return 0
     store = bench.Store(cfg.state_dir / "bench.sqlite")
     if ns.list:
         for rid, created, suite, mode, model, score, submitted in store.rows():
@@ -290,7 +300,7 @@ def cmd_bench(cfg: Config, ns: argparse.Namespace) -> int:
         if ns.json:
             Path(ns.json).write_text(json.dumps(doc, indent=2) + "\n")
         if ns.submit:
-            return _bench_submit(store, ns.run, doc, ns.yes)
+            return _bench_submit(store, ns.run, doc, ns.yes, token_path)
         print(json.dumps(doc, indent=2))
         return 0
     if not ns.model:
@@ -359,7 +369,7 @@ def cmd_bench(cfg: Config, ns: argparse.Namespace) -> int:
     print(f"stored as run #{run_id} in bench.sqlite")
     if ns.json:
         Path(ns.json).write_text(json.dumps(doc, indent=2) + "\n")
-    return _bench_submit(store, run_id, doc, ns.yes) if ns.submit else 0
+    return _bench_submit(store, run_id, doc, ns.yes, token_path) if ns.submit else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -445,10 +455,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--tasks", help="comma-separated task ids (default: all)")
     p.add_argument("--timeout", type=float, default=300.0, help="per-request read timeout in seconds")
     p.add_argument("--json", help="also write the result document to this file")
-    p.add_argument("--submit", action="store_true", help="show the JSON, confirm, then submit it to the leaderboard")
+    p.add_argument("--submit", action="store_true", help="show the JSON, confirm, then submit it to the leaderboard (signs you in through the browser the first time)")
     p.add_argument("--yes", action="store_true", help="submit without asking")
     p.add_argument("--run", type=int, help="use stored run N instead of running (print it, or --submit it)")
     p.add_argument("--list", action="store_true", help="list stored runs")
+    p.add_argument("--unlink", action="store_true", help="sign out: revoke and delete the stored leaderboard token")
 
     from . import local
 

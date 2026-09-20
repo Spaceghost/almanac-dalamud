@@ -4,7 +4,7 @@ A fixed, versioned set of FFXIV tasks that shows how well a local model uses
 XivMcp's tools, and what it costs your machine to run it. The same suite runs
 from the Dalamud plugin (**Almanac → Benchmark**) and headlessly from the
 Python engine (`almanac bench`). Results can be submitted, opt-in and
-anonymously, to the community leaderboard at
+with no identity in the result, to the community leaderboard at
 <https://spacegho.st/mods/ffxiv/almanac/>, which turns them into the model
 recommendations the setup wizard shows.
 
@@ -173,3 +173,12 @@ what the schema allows: GPU name and VRAM (rounded down to 256 MB), rounded
 system RAM, OS family, backend kind/version, model id, quantisation, context,
 tool-calling capability, the scores and per-task results. No player or
 character names, no paths, hostnames, IP addresses or free text.
+
+The leaderboard takes results only from a signed-in player. The first
+`--submit` prints a short code and a spacegho.st address (and opens it when
+there is a display); you sign in there with GitHub or XIVAuth and approve
+Almanac, and the command carries on by itself. The token that comes back is
+kept in `<state_dir>/leaderboard-token` (mode 0600), sent only in the
+`Authorization` header, never printed, and lasts 180 days. `almanac bench
+--unlink` revokes and deletes it. The result document itself is unchanged and
+still carries no identity; the server knows which account sent it.

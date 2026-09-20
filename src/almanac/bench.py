@@ -39,6 +39,11 @@ DEFAULT_SUITE = REPO_ROOT / "benchmark" / "suites" / "ffxiv-core.json"
 RESULTS_SCHEMA = REPO_ROOT / "benchmark" / "schema" / "results.schema.json"
 LEADERBOARD_URL = "https://spacegho.st/mods/ffxiv/almanac/api/results"
 CLIENT_NAME = "almanac-py"
+LINK_API = "https://spacegho.st/mods/ffxiv/term/vote/api"
+LINK_CLIENT_ID = "almanac"
+LINK_SCOPE = "almanac:submit"
+LINK_TOKEN_FILE = "leaderboard-token"
+RELINK_ERRORS = {"invalid_token", "token_revoked", "token_expired", "sign_in_required"}
 # Absolute slack for every numeric tolerance comparison (approx matcher,
 # numbers_from_tool), so 9.55 vs 9.4 +- 0.15 passes despite binary floats.
 EPS = 1e-9
@@ -997,7 +1002,155 @@ def leaderboard_url() -> str:
     return os.environ.get("ALMANAC_LEADERBOARD_URL") or LEADERBOARD_URL
 
 
-def submit(doc: dict[str, Any], client: httpx.Client | None = None, url: str | None = None) -> httpx.Response:
+def submit(doc: dict[str, Any], client: httpx.Client | None = None, url: str | None = None, token: str | None = None) -> httpx.Response:
     client = client or httpx.Client()
-    return client.post(url or leaderboard_url(), content=json.dumps(doc), headers={"Content-Type": "application/json"}, timeout=30)
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return client.post(url or leaderboard_url(), content=json.dumps(doc), headers=headers, timeout=30)
 
+
+# -- device link (sign-in for submissions) ------------------------------------
+#
+# The leaderboard only takes results from a signed-in player. The token and the
+# device code are secrets: they travel in request bodies and the Authorization
+# header only, and nothing here prints or logs them.
+
+
+class LinkError(Exception):
+    """Linking stopped; ``str(exc)`` is what to show the player."""
+
+
+def link_api() -> str:
+    return (os.environ.get("ALMANAC_LINK_API") or LINK_API).rstrip("/")
+
+
+def server_message(response: httpx.Response) -> tuple[str, str]:
+    """(error, message) from a failure body. Never the raw body: it can hold a token."""
+    try:
+        data = response.json()
+    except ValueError:
+        data = None
+    if not isinstance(data, dict):
+        data = {}
+    error = str(data.get("error") or "")[:64]
+    message = str(data.get("message") or "").strip()[:300]
+    return error, message or (f"HTTP {response.status_code} {error}".strip())
+
+
+def read_link_token(path: Path) -> str | None:
+    try:
+        return path.read_text().strip() or None
+    except OSError:
+        return None
+
+
+def write_link_token(path: Path, token: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.unlink(missing_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        handle.write(token + "\n")
+
+
+def open_browser(url: str) -> None:
+    """Best effort. Without a display this does nothing rather than start a text browser."""
+    if os.name == "posix" and platform.system() != "Darwin" and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        return
+    try:
+        import webbrowser
+
+        webbrowser.open(url)
+    except Exception:
+        pass
+
+
+def device_link(
+    client: httpx.Client,
+    say: Callable[[str], None] = print,
+    sleep: Callable[[float], None] | None = None,
+    clock: Callable[[], float] | None = None,
+    browser: Callable[[str], None] | None = None,
+) -> str:
+    """Run the device-link flow and return the access token. Raises LinkError with the server's message."""
+    sleep, clock, browser = sleep or time.sleep, clock or time.monotonic, browser or open_browser
+    try:
+        response = client.post(f"{link_api()}/device/code", json={"client_id": LINK_CLIENT_ID, "scope": LINK_SCOPE}, timeout=30)
+    except httpx.HTTPError as exc:
+        raise LinkError(f"could not reach the sign-in server: {exc.__class__.__name__}") from None
+    if response.status_code != 200:
+        raise LinkError(server_message(response)[1])
+    try:
+        grant = response.json()
+        device_code, user_code, where = str(grant["device_code"]), str(grant["user_code"]), str(grant["verification_uri"])
+        interval, expires = max(1.0, float(grant.get("interval", 5))), float(grant.get("expires_in", 900))
+    except (ValueError, KeyError, TypeError):
+        raise LinkError("the sign-in server sent an answer this client does not understand") from None
+    say(f"To submit results, sign in: open {where} and enter the code {user_code}")
+    say("Waiting for you to approve Almanac there (Ctrl-C to give up)...")
+    complete = grant.get("verification_uri_complete")
+    browser(str(complete) if complete else where)
+    deadline = clock() + expires
+    while True:
+        if clock() + interval >= deadline:
+            raise LinkError("the code expired before it was approved; run the command again")
+        sleep(interval)
+        try:
+            response = client.post(f"{link_api()}/device/token", json={"client_id": LINK_CLIENT_ID, "device_code": device_code}, timeout=30)
+        except httpx.HTTPError:
+            continue
+        if response.status_code == 200:
+            try:
+                token = response.json()["access_token"]
+            except (ValueError, KeyError, TypeError):
+                token = None
+            if not isinstance(token, str) or not token:
+                raise LinkError("the sign-in server sent an answer this client does not understand")
+            return token
+        error, message = server_message(response)
+        if error == "authorization_pending":
+            continue
+        if error == "slow_down":
+            interval += 5
+            continue
+        raise LinkError(message)
+
+
+def submit_linked(
+    doc: dict[str, Any],
+    token_path: Path,
+    client: httpx.Client | None = None,
+    url: str | None = None,
+    link: Callable[[httpx.Client], str] | None = None,
+) -> httpx.Response:
+    """Submit with the stored token, linking first if there is none. A refused token is dropped and linked again, once."""
+    client = client or httpx.Client()
+    link = link or device_link
+    token = read_link_token(token_path)
+    relinked = token is None
+    if token is None:
+        token = link(client)
+        write_link_token(token_path, token)
+    response = submit(doc, client, url, token)
+    if response.status_code == 401 and not relinked and server_message(response)[0] in RELINK_ERRORS:
+        token_path.unlink(missing_ok=True)
+        token = link(client)
+        write_link_token(token_path, token)
+        response = submit(doc, client, url, token)
+    if response.status_code == 401:
+        token_path.unlink(missing_ok=True)
+    return response
+
+
+def unlink(token_path: Path, client: httpx.Client | None = None) -> bool:
+    """Revoke the stored token and delete it. True if there was one. The file goes even if the server is unreachable."""
+    token = read_link_token(token_path)
+    if token is None:
+        return False
+    try:
+        (client or httpx.Client()).post(f"{link_api()}/token/revoke", headers={"Authorization": f"Bearer {token}"}, timeout=30)
+    except httpx.HTTPError:
+        pass
+    finally:
+        token_path.unlink(missing_ok=True)
+    return True

@@ -542,12 +542,14 @@ against the same [scoring vectors](benchmark/testdata/scoring-vectors.json):
 - in game: **Almanac → Benchmark**;
 - headless: `almanac bench --model qwen3:8b` (mock tools, no game needed), or
   `almanac bench --live --model qwen3:8b` against XivMcp; `--submit` shows the
-  JSON and asks before sending it.
+  JSON and asks before sending it, and signs you in through the browser the
+  first time (see benchmark/README.md; `--unlink` signs out).
 
 A result scores tool-call success and validity, answer quality (exact match
 and rubric checks), tokens per second, time to first token and peak VRAM.
-Submissions are anonymous: GPU model, VRAM, rounded RAM, OS family, backend,
-model, quantisation, context and scores; no names, paths or addresses. The
+A submitted result names nobody: GPU model, VRAM, rounded RAM, OS family, backend,
+model, quantisation, context and scores; no names, paths or addresses. You sign in
+to send one, so the server knows which account it came from. The
 leaderboard at <https://spacegho.st/mods/ffxiv/almanac/> turns them into
 per-VRAM-tier recommendations.
 
