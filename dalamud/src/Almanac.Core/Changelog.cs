@@ -17,9 +17,9 @@ public sealed record ChangelogRelease(string Version, string Title, string Blurb
 }
 
 /// <summary>
-/// The changelog players read in the What's new view. It is generated from nothing: changelog.json at
-/// the top of the repository is the source of truth, embedded here at build time and rendered into
-/// CHANGELOG.md by tools/changelog.py, so the two can never disagree.
+/// The changelog players read in the What's new view. Nothing is written here: changelog.json at the
+/// top of the repository is the source of truth, embedded into this assembly at build time and
+/// rendered into CHANGELOG.md by tools/changelog.py, so the two can never disagree.
 /// </summary>
 public sealed class Changelog
 {
