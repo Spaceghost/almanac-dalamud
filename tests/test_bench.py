@@ -295,11 +295,18 @@ def test_cli_bench_stores_and_submits(tmp_path: Path, monkeypatch: pytest.Monkey
     real_client = httpx.Client
     posted: list[dict[str, Any]] = []
     model = FakeModel()
+    site = FakeSite()
+    monkeypatch.setenv("ALMANAC_LINK_API", "https://link.test/api")
+    monkeypatch.setattr(bench.time, "sleep", lambda s: None)
+    monkeypatch.setattr(bench, "open_browser", lambda url: None)
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "board.test":
+            assert request.headers["Authorization"] == f"Bearer {TOKEN}"
             posted.append(json.loads(request.content))
             return httpx.Response(201, json={"ok": True})
+        if request.url.host == "link.test":
+            return site(request)
         if request.url.path.startswith("/v1/"):
             return model(request)
         return httpx.Response(404)
@@ -316,6 +323,7 @@ def test_cli_bench_stores_and_submits(tmp_path: Path, monkeypatch: pytest.Monkey
     assert code == 0
     printed = capsys.readouterr().out
     assert "where_am_i" in printed and "stored as run #1" in printed and "submitted run #1" in printed
+    assert "BCDF-GHJK" in printed and TOKEN not in printed and DEVICE_CODE not in printed
     doc = json.loads(out.read_text())
     assert_conforms(doc)
     assert posted == [doc]
@@ -325,3 +333,191 @@ def test_cli_bench_stores_and_submits(tmp_path: Path, monkeypatch: pytest.Monkey
     assert rows[0][:3] == (1, "fake:1b", 1) and json.loads(rows[0][3]) == doc
     assert cli.main(["--config", str(config), "bench", "--list"]) == 0
     assert "submitted" in capsys.readouterr().out
+
+
+# -- device link ---------------------------------------------------------------
+
+TOKEN = "gvt_" + "t" * 43
+DEVICE_CODE = "dc_" + "d" * 40
+
+
+def fail(status: int, error: str, message: str = "") -> httpx.Response:
+    return httpx.Response(status, json={"ok": False, "error": error, "message": message or f"server says {error}"})
+
+
+class FakeSite:
+    """The sign-in server and the leaderboard: scripted poll answers, then Bearer-gated results."""
+
+    def __init__(self, polls: list[httpx.Response] | None = None, results: list[httpx.Response] | None = None, expires_in: int = 900) -> None:
+        self.polls = list(polls or [])
+        self.results = list(results or [])
+        self.expires_in = expires_in
+        self.requests: list[httpx.Request] = []
+        self.tokens = 0
+
+    def paths(self) -> list[str]:
+        return [r.url.path.rsplit("/api/", 1)[1] for r in self.requests]
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        assert TOKEN not in str(request.url) and DEVICE_CODE not in str(request.url)
+        body = json.loads(request.content) if request.content else {}
+        if request.url.path.endswith("/device/code"):
+            assert body == {"client_id": "almanac", "scope": "almanac:submit"}
+            return httpx.Response(200, json={
+                "device_code": DEVICE_CODE, "user_code": "BCDF-GHJK", "verification_uri": "https://link.test/apps",
+                "verification_uri_complete": "https://link.test/apps?code=BCDF-GHJK", "expires_in": self.expires_in, "interval": 5,
+            })
+        if request.url.path.endswith("/device/token"):
+            assert body == {"client_id": "almanac", "device_code": DEVICE_CODE}
+            if self.polls:
+                return self.polls.pop(0)
+            self.tokens += 1
+            return httpx.Response(200, json={"access_token": TOKEN, "token_type": "Bearer", "expires_in": 15552000, "scope": "almanac:submit", "token_id": "1"})
+        if request.url.path.endswith("/token/revoke"):
+            return httpx.Response(200, json={"ok": True})
+        if request.url.path.endswith("/results"):
+            return self.results.pop(0) if self.results else httpx.Response(201, json={"ok": True})
+        return httpx.Response(404)
+
+
+class Link:
+    def __init__(self, site: FakeSite, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ALMANAC_LINK_API", "https://link.test/api")
+        self.client = httpx.Client(transport=httpx.MockTransport(site))
+        self.said: list[str] = []
+        self.slept: list[float] = []
+        self.opened: list[str] = []
+        self.now = 0.0
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += seconds
+
+    def __call__(self, client: httpx.Client | None = None) -> str:
+        return bench.device_link(client or self.client, say=self.said.append, sleep=self.sleep, clock=lambda: self.now, browser=self.opened.append)
+
+
+def test_link_success_shows_the_code_and_never_the_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    site = FakeSite()
+    link = Link(site, monkeypatch)
+    assert link() == TOKEN
+    said = "\n".join(link.said)
+    assert "BCDF-GHJK" in said and "https://link.test/apps" in said
+    assert TOKEN not in said and DEVICE_CODE not in said
+    assert link.opened == ["https://link.test/apps?code=BCDF-GHJK"] and link.slept == [5.0]
+
+
+def test_link_pending_then_slow_down_then_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    site = FakeSite(polls=[fail(400, "authorization_pending"), fail(400, "slow_down"), fail(400, "authorization_pending")])
+    link = Link(site, monkeypatch)
+    assert link() == TOKEN
+    assert link.slept == [5.0, 5.0, 10.0, 10.0]
+
+
+@pytest.mark.parametrize("error", ["access_denied", "expired_token", "invalid_grant"])
+def test_link_stops_with_the_server_message(monkeypatch: pytest.MonkeyPatch, error: str) -> None:
+    site = FakeSite(polls=[fail(400, "authorization_pending"), fail(400, error, f"no: {error}")])
+    link = Link(site, monkeypatch)
+    with pytest.raises(bench.LinkError, match=f"no: {error}"):
+        link()
+    assert site.paths() == ["device/code", "device/token", "device/token"]
+
+
+def test_link_gives_up_at_expires_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    site = FakeSite(polls=[fail(400, "authorization_pending")] * 50, expires_in=20)
+    link = Link(site, monkeypatch)
+    with pytest.raises(bench.LinkError, match="expired"):
+        link()
+    assert sum(link.slept) < 20 and site.tokens == 0
+
+
+def test_link_refused_at_the_code_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    link = Link(FakeSite(), monkeypatch)
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: fail(429, "busy", "try again in an hour")))
+    with pytest.raises(bench.LinkError, match="try again in an hour"):
+        link(client)
+
+
+def test_open_browser_is_harmless_headless(monkeypatch: pytest.MonkeyPatch) -> None:
+    import webbrowser
+
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.setattr(bench.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(webbrowser, "open", lambda url: pytest.fail("opened a browser without a display"))
+    bench.open_browser("https://link.test/apps")
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.setattr(webbrowser, "open", lambda url: (_ for _ in ()).throw(RuntimeError("no browser")))
+    bench.open_browser("https://link.test/apps")
+
+
+def test_token_file_is_private(tmp_path: Path) -> None:
+    path = tmp_path / "state" / bench.LINK_TOKEN_FILE
+    bench.write_link_token(path, "old")
+    path.chmod(0o644)
+    bench.write_link_token(path, TOKEN)
+    assert path.stat().st_mode & 0o777 == 0o600 and bench.read_link_token(path) == TOKEN
+
+
+def test_submit_links_once_then_reuses_the_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    site = FakeSite()
+    link = Link(site, monkeypatch)
+    path = tmp_path / bench.LINK_TOKEN_FILE
+    for _ in range(2):
+        assert bench.submit_linked({"a": 1}, path, link.client, "https://link.test/api/results", link=link).status_code == 201
+    assert site.paths() == ["device/code", "device/token", "results", "results"]
+    assert [r.headers["Authorization"] for r in site.requests[2:]] == [f"Bearer {TOKEN}"] * 2
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("error", sorted(bench.RELINK_ERRORS))
+def test_refused_token_is_dropped_and_linked_again_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: str) -> None:
+    path = tmp_path / bench.LINK_TOKEN_FILE
+    bench.write_link_token(path, "gvt_stale")
+    site = FakeSite(results=[fail(401, error)])
+    link = Link(site, monkeypatch)
+    assert bench.submit_linked({"a": 1}, path, link.client, "https://link.test/api/results", link=link).status_code == 201
+    assert site.paths() == ["results", "device/code", "device/token", "results"]
+    assert bench.read_link_token(path) == TOKEN
+
+    site = FakeSite(results=[fail(401, error), fail(401, error, "still no")])
+    link = Link(site, monkeypatch)
+    response = bench.submit_linked({"a": 1}, path, link.client, "https://link.test/api/results", link=link)
+    assert response.status_code == 401 and bench.server_message(response)[1] == "still no"
+    assert site.paths() == ["results", "device/code", "device/token", "results"] and not path.exists()
+
+
+def test_forbidden_is_not_retried_and_keeps_the_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / bench.LINK_TOKEN_FILE
+    bench.write_link_token(path, TOKEN)
+    site = FakeSite(results=[fail(403, "account_banned", "this account may not submit")])
+    link = Link(site, monkeypatch)
+    response = bench.submit_linked({"a": 1}, path, link.client, "https://link.test/api/results", link=link)
+    assert response.status_code == 403 and site.paths() == ["results"] and path.exists()
+    assert bench.server_message(response) == ("account_banned", "this account may not submit")
+
+
+def test_cli_shows_the_server_message_and_unlinks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    doc, _ = run_fake(FakeModel())
+    real_client = httpx.Client
+    site = FakeSite(results=[fail(403, "account_banned", "this account may not submit")])
+    monkeypatch.setattr(httpx, "Client", lambda *a, **k: real_client(transport=httpx.MockTransport(site)))
+    monkeypatch.setenv("ALMANAC_LEADERBOARD_URL", "https://link.test/api/results")
+    monkeypatch.setenv("ALMANAC_LINK_API", "https://link.test/api")
+    state = tmp_path / "state"
+    config = tmp_path / "config.toml"
+    config.write_text(f'state_dir = "{state}"\n')
+    state.mkdir()
+    bench.write_link_token(state / bench.LINK_TOKEN_FILE, TOKEN)
+    bench.Store(state / "bench.sqlite").add(doc)
+
+    assert cli.main(["--config", str(config), "bench", "--run", "1", "--submit", "--yes"]) == 1
+    captured = capsys.readouterr()
+    assert "this account may not submit" in captured.err and TOKEN not in captured.out + captured.err
+
+    assert cli.main(["--config", str(config), "bench", "--unlink"]) == 0
+    assert "signed out" in capsys.readouterr().out and not (state / bench.LINK_TOKEN_FILE).exists()
+    assert site.requests[-1].url.path.endswith("/token/revoke") and site.requests[-1].headers["Authorization"] == f"Bearer {TOKEN}"
+    assert cli.main(["--config", str(config), "bench", "--unlink"]) == 0
+    assert "not signed in" in capsys.readouterr().out
