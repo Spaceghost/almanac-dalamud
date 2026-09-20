@@ -27,11 +27,11 @@ public sealed class ChangelogTests
     {
         string[] known = ["new", "fix", "beta", "next"];
         foreach (var release in Changelog.Bundled().Releases)
-        foreach (var item in release.Items)
-        {
-            Assert.Contains(item.Status, known);
-            Assert.NotEmpty(Changelog.Label(item.Status));
-        }
+            foreach (var item in release.Items)
+            {
+                Assert.Contains(item.Status, known);
+                Assert.NotEmpty(Changelog.Label(item.Status));
+            }
     }
 
     [Fact]

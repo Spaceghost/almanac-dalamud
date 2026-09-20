@@ -1,0 +1,76 @@
+# The managed battery, on every push and pull request to master and weekly:
+# formatting, the unload-leak and allocation-budget tests, vulnerable and
+# copyleft dependencies. Each check is one matrix row: a row in the job
+# summary, one issue (label quality-<kind>) kept up to date on master, logs
+# uploaded. GitHub-hosted runners; a pull request never touches issues.
+name: Battery
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: '51 8 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: battery-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECTS: dalamud/src/Almanac.Core/Almanac.Core.csproj dalamud/tests/Almanac.Core.Tests/Almanac.Core.Tests.csproj
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+
+jobs:
+  battery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: format
+            run: 'for p in $PROJECTS; do dotnet format whitespace "$p" --verify-no-changes --no-restore && dotnet format style "$p" --verify-no-changes --no-restore --severity warn || exit 1; done'
+          - kind: leaks-and-allocations
+            run: 'dotnet test dalamud/tests/Almanac.Core.Tests --filter "FullyQualifiedName~Leak|FullyQualifiedName~Allocation"'
+          - kind: vulnerable-packages
+            run: 'tools/ci/vulnerable.sh $PROJECTS'
+          - kind: licences
+            run: 'tools/ci/licences.py $PROJECTS'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: dalamud/global.json
+      - name: Restore
+        run: for p in $PROJECTS; do dotnet restore "$p"; done
+      - name: ${{ matrix.kind }}
+        id: check
+        env:
+          CHECK: ${{ matrix.run }}
+        run: |
+          mkdir -p build
+          set -o pipefail
+          bash -c "$CHECK" 2>&1 | tee "build/check-${{ matrix.kind }}.log"
+      - name: Report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: tools/ci/report-issue.sh "${{ matrix.kind }}" "${{ steps.check.outcome == 'success' && 'pass' || 'fail' }}" "build/check-${{ matrix.kind }}.log"
+      - name: Upload the log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.kind }}-${{ github.run_id }}
+          path: build/check-*.log
+          if-no-files-found: ignore
