@@ -1,3 +1,4 @@
+using Almanac.Core.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -22,7 +23,9 @@ public sealed class McpHttpClient(HttpClient http, Uri endpoint, string? bearerT
 {
     public const string ProtocolVersion = "2025-06-18";
 
-    private readonly SemaphoreSlim initLock = new(1, 1);
+    private readonly SemaphoreSlim initLock = Track();
+
+    private int disposed;
     private string? sessionId;
     private string? negotiatedVersion;
     private int nextId;
@@ -194,5 +197,17 @@ public sealed class McpHttpClient(HttpClient http, Uri endpoint, string? bearerT
     }
 
     /// <summary>Releases the initialisation lock. The <see cref="HttpClient"/> is the caller's and is left alone.</summary>
-    public void Dispose() => initLock.Dispose();
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+            return;
+        initLock.Dispose();
+        LiveObjects.Released(LiveObjects.Kinds.McpClient);
+    }
+
+    private static SemaphoreSlim Track()
+    {
+        LiveObjects.Acquired(LiveObjects.Kinds.McpClient);
+        return new SemaphoreSlim(1, 1);
+    }
 }

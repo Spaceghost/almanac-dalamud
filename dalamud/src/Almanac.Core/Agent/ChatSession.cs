@@ -1,3 +1,4 @@
+using Almanac.Core.Diagnostics;
 using System.Text;
 using Almanac.Core.Llm;
 using Almanac.Core.Storage;
@@ -32,10 +33,17 @@ public sealed class ChatSession(AlmanacStore store, Func<AgentLoop> newLoop, Fun
         "ask the player to approve them in game first; if one is denied or times out, say so and do not retry it. " +
         "Keep answers short and concrete: names, numbers, coordinates.";
 
-    private readonly Lock gate = new();
+    private readonly Lock gate = TrackedLock();
+
+    private static Lock TrackedLock()
+    {
+        LiveObjects.Acquired(LiveObjects.Kinds.ChatSession);
+        return new Lock();
+    }
     private readonly List<ChatLine> lines = [];
     private readonly StringBuilder streaming = new();
     private CancellationTokenSource? running;
+    private int disposed;
 
     public ThreadInfo? Thread { get; private set; }
 
@@ -94,6 +102,8 @@ public sealed class ChatSession(AlmanacStore store, Func<AgentLoop> newLoop, Fun
         running = null;
         inFlight?.Cancel();
         inFlight?.Dispose();
+        if (Interlocked.Exchange(ref disposed, 1) == 0)
+            LiveObjects.Released(LiveObjects.Kinds.ChatSession);
     }
 
     public async Task SendAsync(string text)

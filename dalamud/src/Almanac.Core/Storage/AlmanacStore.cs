@@ -1,3 +1,4 @@
+using Almanac.Core.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -23,6 +24,7 @@ public sealed class AlmanacStore : IDisposable
 
     private readonly SqliteConnection db;
     private readonly Lock gate = new();
+    private bool disposed;
 
     public AlmanacStore(string path)
     {
@@ -31,6 +33,7 @@ public sealed class AlmanacStore : IDisposable
         db.Open();
         Exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=2000;");
         Migrate();
+        LiveObjects.Acquired(LiveObjects.Kinds.Store);
     }
 
     public static AlmanacStore InMemory() => new(":memory:");
@@ -263,7 +266,14 @@ public sealed class AlmanacStore : IDisposable
     public void Dispose()
     {
         lock (gate)
+        {
+            if (disposed)
+                return;
+            disposed = true;
             db.Dispose();
+        }
+
+        LiveObjects.Released(LiveObjects.Kinds.Store);
     }
 
     // ---- helpers ------------------------------------------------------------------------------------
