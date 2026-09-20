@@ -450,6 +450,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run", type=int, help="use stored run N instead of running (print it, or --submit it)")
     p.add_argument("--list", action="store_true", help="list stored runs")
 
+    from . import local
+
+    p = add("local", local.dispatch, "Claude ran out? status, code, chat, ask on your own models (also installed as `ai`)")
+    p.description, p.formatter_class = local.__doc__, argparse.RawDescriptionHelpFormatter
+    local.add_arguments(p)
+
     from .autopilot.cli import register as register_autopilot
 
     register_autopilot(sub)

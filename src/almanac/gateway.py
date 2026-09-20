@@ -33,6 +33,7 @@ from typing import Any, AsyncIterator
 
 import httpx
 from starlette.applications import Starlette
+from starlette.background import BackgroundTask
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
@@ -79,6 +80,7 @@ class Gateway:
         self.guard = guard or Guard(config.section("guard"))
         self.client = client or httpx.AsyncClient(timeout=httpx.Timeout(float(self.settings.get("request_timeout", 600)), connect=5))
         self._token = config.read_token()
+        self.inflight = 0  # model requests being served; /healthz reports it so clients can tell busy from free
         residency = config.section("residency")
         model = str(residency.get("model") or self.settings.get("default_model"))
         if residency.get("keep_loaded_while_process") and model not in self.settings.get("allowed_models", []):
@@ -107,6 +109,7 @@ class Gateway:
     async def healthz(self, request: Request) -> Response:
         loaded = await self.loaded_models()
         return JSONResponse({"ok": True, "backend": self.backend, "loaded": loaded, "may_load": self.guard.may_load(False).reason,
+                             "inflight": self.inflight,
                              "residency": self.residency.snapshot()})
 
     async def models(self, request: Request) -> Response:
@@ -146,10 +149,23 @@ class Gateway:
             if name in request.headers:
                 headers[name] = request.headers[name]
         upstream = self.client.build_request("POST", f"{self.backend}{request.url.path}", json=body, headers=headers)
+        self.inflight += 1
         try:
             response = await self.client.send(upstream, stream=True)
         except httpx.HTTPError as exc:
+            self.inflight -= 1
             return _error(api, 502, f"backend unreachable: {exc.__class__.__name__}")
+        except BaseException:
+            self.inflight -= 1
+            raise
+
+        open_ = [True]
+
+        async def done() -> None:  # once, from the stream's end or (if it never started) after the response
+            if open_:
+                open_.clear()
+                self.inflight -= 1
+                await response.aclose()
 
         async def relay() -> AsyncIterator[bytes]:
             try:
@@ -163,10 +179,10 @@ class Gateway:
                     data = json.loads(await response.aread())
                     yield json.dumps(codex_compat.restore(data, namespaces)).encode()
             finally:
-                await response.aclose()
+                await done()
 
         passthrough = {k: v for k, v in response.headers.items() if k.lower() in ("content-type", "cache-control")}
-        return StreamingResponse(relay(), status_code=response.status_code, headers=passthrough)
+        return StreamingResponse(relay(), status_code=response.status_code, headers=passthrough, background=BackgroundTask(done))
 
     # -- memory watch --------------------------------------------------------
     async def watch(self) -> None:

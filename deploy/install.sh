@@ -28,6 +28,7 @@ mkdir -p "$share" "$units" "$HOME/.local/bin"
 "$share/venv/bin/pip" install --quiet --disable-pip-version-check -e "$repo"
 ln -sfn "$repo/README.md" "$share/README.md"
 ln -sfn "$share/venv/bin/almanac" "$HOME/.local/bin/almanac"
+ln -sfn "$share/venv/bin/ai" "$HOME/.local/bin/ai"   # ai ... = almanac local ...
 
 "$share/venv/bin/almanac" init
 

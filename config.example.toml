@@ -56,6 +56,27 @@ max_steps = 8
 reasoning_effort = "none"            # thinking off: much faster on small models
 context_tokens = 8192                # the model's context: thread history (ask --thread) is trimmed to fit
 
+# `almanac local` / `ai`: your own models when the cloud is unavailable (README
+# "When Claude runs out"). Without this section the [autopilot.pool.*] backends
+# are used, and without those the [gateway] on this machine. Use addresses every
+# machine of yours can reach (a VPN/Tailscale address, not 127.0.0.1) so the
+# same config works on the laptop too; each machine needs the token files.
+# [local]
+# webui_url = "https://chat.example.ts.net"   # Open WebUI, if you run one: shown by `ai status`
+# default = ""                        # preferred backend; `ai use NAME` overrides it per machine
+# probe_timeout = 45                  # seconds `ai status` waits for its ~60-token speed probe
+# allow_claude = false                # true: `ai claude` without --experimental
+#
+# [local.backends.gpu-box]
+# url = "http://100.64.0.20:41881"
+# kind = "almanac"                    # almanac (gateway) | ollama | openai
+# gpu = "RTX 3060 12 GB"              # free text for the status table
+# model = "qwen3.5:9b"
+# context = 32768                     # what the backend really serves (OLLAMA_CONTEXT_LENGTH)
+# expected_tok_s = 35                 # measured once with `ai status`; shown before each session
+# token_file = "~/.config/almanac/gpu-box.token"
+# priority = 10                       # higher first among free backends
+
 # Companion MCP servers the local agent may use. Example: XivMcp in FFXIV.
 # [upstreams.xivmcp]
 # url = "http://127.0.0.1:41800/mcp"

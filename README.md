@@ -9,6 +9,8 @@ lets AI clients use that knowledge and those tools:
 - or they run **entirely on a local model** through almanac's **gateway**,
   which speaks the Anthropic Messages and OpenAI Chat/Responses APIs in front
   of Ollama;
+- or, **when the cloud runs out**, `ai` ([When Claude runs out](#when-claude-runs-out))
+  shows which of your own GPUs are free and starts a coding or chat session on one;
 - or you ask almanac itself: `almanac ask`, `almanac chat`, `almanac run
   <runbook>` (also from systemd timers), with no cloud tokens at all.
 
@@ -152,6 +154,98 @@ then `done` {answer, thread, title} or `error` {message, code}.
 replays a thread as `message` {role, text} and `tool` lines; both end with
 `end`.
 
+## When Claude runs out
+
+```sh
+ai                  # what is up right now, picks the best backend, starts a session
+ai code ~/src/repo  # coding session in that repo on your own GPU
+ai ask "question"   # one answer; pipe text in:  ai ask "why does this fail" < error.log
+```
+
+`ai` is `almanac local` (`deploy/install.sh` links both into `~/.local/bin`).
+It works from any machine that has almanac, the config and the token files.
+
+| command | what it does |
+| --- | --- |
+| `ai status` | every configured backend: GPU, model, context, tok/s from a 64-token probe, and whether it is down, busy, loading or free. `*` marks the one a session would use. `--no-probe` for health only, `--json` for programs |
+| `ai code [path]` | Codex CLI in that directory on the local model. `-p "task"` does one task and exits |
+| `ai chat` | plain chat, no tools. `/new` clears it, `/quit` leaves |
+| `ai ask "..."` | one question. Piped text is appended; the banner goes to stderr, so `ai ask -q ... > out.txt` is clean |
+| `ai use NAME` / `ai use auto` | pin a backend on this machine, or go back to automatic |
+| `ai webui` | the address of your Open WebUI, for chat in a browser or on a phone (`[local] webui_url`) |
+| `ai limits` | the expectations below |
+| `ai claude [path]` | Claude Code itself on the local model. Opt-in: see below |
+
+With no pin, the choice is: up, then free before busy, then `priority`, then
+speed. `-b NAME` picks a backend for one run. When the pinned backend is down
+the next best is used and it says so.
+
+**Set your expectations at the door.** Every session starts by printing the
+model, the context it really has and how fast it is, and this:
+
+```
+What to expect (a ~9B local model is not Claude):
+  good at   focused edits in one or two files, writing and fixing tests, explaining
+            code and errors, shell/git/regex help, summaries, commit messages
+  weak at   large refactors, reasoning across many files, long sessions (it forgets
+            once the context fills), unfamiliar APIs (it invents them), subtle bugs
+  so        give it one small task with the file names and the test command, read
+            every diff, and keep the big jobs for when Claude is back
+```
+
+`ai code` does not re-derive anything: it is autopilot's `LOCAL_PRESETS["codex"]`
+([Local coding sessions](#local-coding-sessions)) with `exec --json` taken off
+for a person. So web search is off, the context window is declared, the tool
+list is short, the sandbox is `workspace-write` with no approvals, and
+`CODEX_HOME` is `<state>/local/codex-home`, never your `~/.codex`. Extra Codex
+options go after the path: `ai code . -- --search`.
+
+### Backends
+
+```toml
+[local]
+webui_url = "https://chat.example.ts.net"
+
+[local.backends.gpu-box]
+url = "http://100.64.0.20:41881"     # an address every machine of yours can reach
+kind = "almanac"                     # almanac (gateway) | ollama | openai
+gpu = "RTX 3060 12 GB"
+model = "qwen3.5:9b"
+context = 32768                      # what it really serves
+expected_tok_s = 35                  # from `ai status`; shown before each session
+token_file = "~/.config/almanac/gpu-box.token"
+priority = 10
+```
+
+Without `[local.backends]` the `[autopilot.pool.*]` backends are used, and
+without those the `[gateway]` on this machine. On a second machine (a laptop):
+install almanac, copy the config and each backend's token file (mode 0600)
+into `~/.config/almanac/`, and use addresses that are reachable from there,
+not `127.0.0.1`. "Busy" comes from the gateway's `/healthz` `inflight` count;
+a gateway older than that field, or a plain Ollama, is called busy only when
+the speed probe times out.
+
+### Claude Code on the local model
+
+The gateway serves the Anthropic Messages API (Ollama speaks it natively), so
+Claude Code can run on the local model. Whether that is *useful* depends on
+how it is started. Measured on a Quadro P4000 (qwen3.5:9b, 32k context), same
+scratch repository, tests red before and green after:
+
+| how | opening request | result |
+| --- | --- | --- |
+| `claude --bare`, own config dir (what `ai claude` does) | ~1.5k tokens, 3 tools (Bash, Edit, Read) | fix a one-line bug: green in 31 s, 5 turns. Add a function and its tests: green in 62 s, 6 turns. An empty-sequence bug, through `ai claude` itself: green in 67 s. No failed tool calls |
+| plain `claude` pointed at the gateway | ~28k tokens, 24 tools | the one-line fix: green in 119 s. The tool list alone nearly fills the 32k context, so there is no room for real work |
+
+So `ai claude` exists and is opt-in (`ai claude --experimental`, or
+`allow_claude = true` under `[local]`): it runs `claude --bare` with
+`CLAUDE_CONFIG_DIR=<state>/local/claude-config`, which means no plugins, MCP
+servers, hooks, `CLAUDE.md` or memory, and a first-run setup screen the first
+time. That is four tiny tasks, not an evaluation: nothing larger than a
+one-file change was tried, and tool-call fidelity of a 9B model over a long
+session is exactly where it would be expected to fail. `ai code` has more
+mileage. Pointing your everyday `claude` at the gateway is not recommended.
+
 ## Connect Claude Code
 
 Keep the token out of files and history: export it from the token file.
@@ -174,14 +268,17 @@ Or in a project's `.mcp.json` (or a file passed with `--mcp-config`):
 
 Local stdio (no network, no token): `claude mcp add almanac -- almanac mcp --stdio`.
 
-Run Claude Code **on the local model** for routine jobs:
+Claude Code **on the local model**: use `ai claude` ([above](#claude-code-on-the-local-model)),
+which sets this up bare. By hand it is:
 
 ```sh
-ANTHROPIC_BASE_URL=http://127.0.0.1:41881 ANTHROPIC_AUTH_TOKEN="$ALMANAC_TOKEN" \
+ANTHROPIC_BASE_URL=http://127.0.0.1:41881 ANTHROPIC_API_KEY="$ALMANAC_TOKEN" \
 ANTHROPIC_MODEL=claude-sonnet-4-5 ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4-5 \
-CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 claude
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 CLAUDE_CONFIG_DIR=~/.local/state/almanac/local/claude-config \
+claude --bare
 ```
 
+Without `--bare` the tool list alone is ~28k tokens, most of a 32k context.
 Any `claude-*` name maps to the local model (`[gateway.models]`).
 
 ## Connect Codex
@@ -775,7 +872,7 @@ For running it in an Incus container, see `deploy/incus/README.md`.
 ```
 src/almanac/      config, kb (index), tools (TOML runner), service (confirm+audit),
                   mcp_server, gateway, codex_compat, guard, residency, agent, chat, threads,
-                  upstream, cli
+                  upstream, cli, local (`almanac local` / `ai`)
 src/almanac/autopilot/  store (queue), sources, planner, pool, budget, coder, sandbox,
                   git, game, runner, digest, app/cli/mcp_tools
 examples/         knowledge/ and tools/ to copy from
@@ -853,3 +950,10 @@ observed working; say what is unverified in the entry itself, the way
   `state`/`status`, `result`). No quest-tracker objective tool exists in
   XivMcp yet, so that path is feature-detected and untested. The bubblewrap
   profile has not been run with the real coding CLIs.
+- `almanac local` / `ai`: `status`, `ask` and one-shot `code -p` were run
+  against two real backends (almanac gateways in front of Ollama). The
+  interactive Codex session was only seen to start, not used for a typed turn;
+  `ai chat` was not driven by a person; `kind = "ollama"` and `kind = "openai"`
+  backends, a second machine (laptop) and the gateway's `inflight` busy signal
+  on a deployed gateway are tested with fakes only. `ai claude` rests on four
+  tiny tasks (see "Claude Code on the local model").

@@ -28,6 +28,7 @@ Homepage = "https://github.com/Spaceghost/almanac-dalamud"
 
 [project.scripts]
 almanac = "almanac.cli:main"
+ai = "almanac.local:main"   # `ai ...` is `almanac local ...`
 
 [tool.setuptools.packages.find]
 where = ["src"]
