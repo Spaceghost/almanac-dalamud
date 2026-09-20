@@ -4,9 +4,10 @@
   "intro": "Every change to Almanac a user can see, newest first: the local agent and its engine, and the Almanac plugin in FFXIV.\n\nAlmanac's releases are built and tested without the game. Everything below is merged and unit-tested with fakes; what has and has not actually been run against a real model server, a real game or real hardware is listed in the README's \"Untested\" section, and each entry says so for itself.",
   "releases": [
     {
-      "version": "next",
-      "title": "In the workshop",
-      "blurb": "Merged, but nothing here has been through a release. BETA means it is built and tested with fakes but has not been seen working in the place it is meant to run; SOON means it is still being built.",
+      "version": "0.2.0",
+      "title": "Released 2026-09-20",
+      "date": "2026-09-20",
+      "blurb": "BETA entries are in this release but have not been verified in game yet; they become NEW or FIX once they have been seen working.",
       "items": [
         {
           "status": "beta",
