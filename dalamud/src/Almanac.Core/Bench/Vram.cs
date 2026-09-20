@@ -1,3 +1,4 @@
+using Almanac.Core.Diagnostics;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json.Nodes;
@@ -105,7 +106,14 @@ public sealed class FirstVramProbe(params IVramProbe[] probes) : IVramProbe
 /// <summary>Samples a probe every interval in the background and keeps the peak.</summary>
 public sealed class VramSampler(IVramProbe probe, TimeSpan interval) : IAsyncDisposable
 {
-    private readonly CancellationTokenSource cts = new();
+    private readonly CancellationTokenSource cts = Track();
+    private int disposed;
+
+    private static CancellationTokenSource Track()
+    {
+        LiveObjects.Acquired(LiveObjects.Kinds.VramSampler);
+        return new CancellationTokenSource();
+    }
     private Task? loop;
     private int? peak;
 
@@ -153,5 +161,7 @@ public sealed class VramSampler(IVramProbe probe, TimeSpan interval) : IAsyncDis
         if (loop != null)
             await StopAsync().ConfigureAwait(false);
         cts.Dispose();
+        if (Interlocked.Exchange(ref disposed, 1) == 0)
+            LiveObjects.Released(LiveObjects.Kinds.VramSampler);
     }
 }

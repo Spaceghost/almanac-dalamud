@@ -1,3 +1,4 @@
+using Almanac.Core.Diagnostics;
 using System.Text.Json.Nodes;
 using Almanac.Core.Llm;
 using Almanac.Core.Mcp;
@@ -36,8 +37,15 @@ public interface IToolSource
 public sealed class McpToolSource(McpHttpClient client, string id = "xivmcp") : IToolSource, IDisposable
 {
     private IReadOnlyList<ToolDef>? cached;
+    private int disposed;
 
-    public string Id { get; } = id;
+    public string Id { get; } = Track(id);
+
+    private static string Track(string id)
+    {
+        LiveObjects.Acquired(LiveObjects.Kinds.McpToolSource);
+        return id;
+    }
 
     public McpHttpClient Client { get; } = client;
 
@@ -52,7 +60,13 @@ public sealed class McpToolSource(McpHttpClient client, string id = "xivmcp") : 
 
     public void Invalidate() => cached = null;
 
-    public void Dispose() => Client.Dispose();
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+            return;
+        Client.Dispose();
+        LiveObjects.Released(LiveObjects.Kinds.McpToolSource);
+    }
 
     public async Task<ToolOutcome> CallAsync(string name, JsonObject arguments, CancellationToken ct)
     {
