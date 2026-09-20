@@ -18,7 +18,7 @@ public sealed class McpException(string message) : Exception(message);
 /// MCP client over Streamable HTTP (JSON-RPC POSTs; replies as JSON or as an SSE stream). Enough for XivMcp and the
 /// almanac MCP server: initialize, tools/list, tools/call. Thread-safe for concurrent calls after initialisation.
 /// </summary>
-public sealed class McpHttpClient(HttpClient http, Uri endpoint, string? bearerToken, string clientName, string clientVersion)
+public sealed class McpHttpClient(HttpClient http, Uri endpoint, string? bearerToken, string clientName, string clientVersion) : IDisposable
 {
     public const string ProtocolVersion = "2025-06-18";
 
@@ -140,7 +140,8 @@ public sealed class McpHttpClient(HttpClient http, Uri endpoint, string? bearerT
         }
 
         var mediaType = response.Content.Headers.ContentType?.MediaType ?? "";
-        await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        await using var streamScope = stream.ConfigureAwait(false);
         JsonNode? reply = null;
         if (mediaType.Contains("event-stream", StringComparison.OrdinalIgnoreCase))
         {
@@ -191,4 +192,7 @@ public sealed class McpHttpClient(HttpClient http, Uri endpoint, string? bearerT
             message.Headers.TryAddWithoutValidation("MCP-Protocol-Version", negotiatedVersion);
         return message;
     }
+
+    /// <summary>Releases the initialisation lock. The <see cref="HttpClient"/> is the caller's and is left alone.</summary>
+    public void Dispose() => initLock.Dispose();
 }

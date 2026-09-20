@@ -53,7 +53,7 @@ public sealed class Plugin : IDalamudPlugin
 
         pi.UiBuilder.Draw += windows.Draw;
         pi.UiBuilder.OpenMainUi += OpenChat;
-        pi.UiBuilder.OpenConfigUi += () => settingsWindow.IsOpen = true;
+        pi.UiBuilder.OpenConfigUi += OpenSettings;
 
         commands.AddHandler(Command, new CommandInfo(OnCommand)
         {
@@ -128,6 +128,7 @@ public sealed class Plugin : IDalamudPlugin
         apiVersion.UnregisterFunc();
         pi.UiBuilder.Draw -= windows.Draw;
         pi.UiBuilder.OpenMainUi -= OpenChat;
+        pi.UiBuilder.OpenConfigUi -= OpenSettings;
         windows.RemoveAllWindows();
         benchWindow.Dispose();
         setupWindow.Dispose();
