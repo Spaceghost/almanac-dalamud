@@ -35,8 +35,12 @@ public sealed class DeviceLinkTests
                 Assert.True(JsonNode.DeepEquals(JsonNode.Parse(body), new JsonObject { ["client_id"] = "almanac", ["scope"] = "almanac:submit" }));
                 return FakeHandler.Json(new JsonObject
                 {
-                    ["device_code"] = DeviceCode, ["user_code"] = "BCDF-GHJK", ["verification_uri"] = "https://link.test/apps",
-                    ["verification_uri_complete"] = "https://link.test/apps?code=BCDF-GHJK", ["expires_in"] = ExpiresIn, ["interval"] = 5,
+                    ["device_code"] = DeviceCode,
+                    ["user_code"] = "BCDF-GHJK",
+                    ["verification_uri"] = "https://link.test/apps",
+                    ["verification_uri_complete"] = "https://link.test/apps?code=BCDF-GHJK",
+                    ["expires_in"] = ExpiresIn,
+                    ["interval"] = 5,
                 }.ToJsonString());
             }
 

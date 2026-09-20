@@ -59,9 +59,10 @@ def check(manifest: dict, props_version: str | None, tag: str | None) -> list[st
     if version and props_version and version != props_version:
         bad.append(f"AssemblyVersion {version} does not match Directory.Build.props <Version> {props_version}")
     if version and tag:
-        want = "v" + version.removesuffix(".0")
+        # vX.Y.Z or vX.Y.Z-test.N; the fourth number counts builds (tools/releasekit.py)
+        want = "v" + version.rsplit(".", 1)[0]
         if tag != want and not tag.startswith(want + "-"):
-            bad.append(f"tag {tag} does not name AssemblyVersion {version} (expected {want} or {want}-<pre>)")
+            bad.append(f"tag {tag} does not name AssemblyVersion {version} (expected {want} or {want}-test.N)")
     return bad
 
 

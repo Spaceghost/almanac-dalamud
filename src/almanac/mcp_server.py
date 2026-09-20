@@ -25,6 +25,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.types import Receive, Scope, Send
 
+from . import __version__
 from .service import Almanac
 
 log = logging.getLogger("almanac.mcp")
@@ -39,7 +40,7 @@ kb_note. Never put secrets in notes; reference the file that holds them."""
 
 
 def build_server(almanac: Almanac, transport: str) -> Server:
-    server: Server = Server("almanac", version="0.2.0", instructions=INSTRUCTIONS)
+    server: Server = Server("almanac", version=__version__, instructions=INSTRUCTIONS)
 
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:

@@ -6,6 +6,10 @@ generated from it so the two can never disagree.
 
     tools/changelog.py            write CHANGELOG.md
     tools/changelog.py --check    exit 1 (and print a diff) if it is out of date
+    tools/changelog.py --dump     the sections as JSON (tools/releasekit.py reads this)
+    tools/changelog.py --release X.Y.Z --date YYYY-MM-DD [--title TITLE]
+                                  turn the unreleased section into release X.Y.Z;
+                                  tools/release.sh does this, nobody needs to by hand
 
 Statuses mean the same thing in every one of these mods:
 
@@ -69,6 +73,8 @@ def render(data):
     for rel in data["releases"]:
         if rel["version"] == "next":
             out.append("\n## [Unreleased] — %s\n" % rel["title"])
+        elif rel.get("date") and rel["date"] not in rel["title"]:
+            out.append("\n## [%s] — %s — %s\n" % (rel["version"], rel["date"], rel["title"]))
         else:
             out.append("\n## [%s] — %s\n" % (rel["version"], rel["title"]))
         out.append("\n%s\n" % rel["blurb"])
@@ -87,10 +93,61 @@ def render(data):
     return "".join(out)
 
 
+RELEASED_BLURB = (
+    "BETA entries are in this release but have not been verified in game yet; "
+    "they become NEW or FIX once they have been seen working."
+)
+
+
+def release(data, version, date, title):
+    """Turn the unreleased section into release `version`.
+
+    Entries still being built ("next") stay behind in the unreleased section; everything
+    else moves, status and all."""
+    rels = data["releases"]
+    at = next((n for n, r in enumerate(rels) if r["version"] == "next"), None)
+    if at is None:
+        raise SystemExit("changelog.json: no unreleased (next) section to release")
+    staying = [i for i in rels[at]["items"] if i["status"] == "next"]
+    moving = [i for i in rels[at]["items"] if i["status"] != "next"]
+    if not moving:
+        raise SystemExit("changelog.json: nothing in the unreleased section is merged yet")
+    released = {
+        "version": version,
+        "title": title or "Released " + date,
+        "date": date,
+        "blurb": RELEASED_BLURB,
+        "items": moving,
+    }
+    if staying:
+        rels[at]["items"] = staying
+        rels.insert(at + 1, released)
+    else:
+        rels[at] = released
+    return data
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--check", action="store_true", help="fail when CHANGELOG.md is out of date")
+    ap.add_argument("--dump", action="store_true", help="print the sections as JSON")
+    ap.add_argument("--release", metavar="X.Y.Z", help="turn the unreleased section into this release")
+    ap.add_argument("--date", help="with --release: YYYY-MM-DD")
+    ap.add_argument("--title", help="with --release: the release's name")
     args = ap.parse_args()
+    if args.dump:
+        rels = [dict(r, date=r.get("date")) for r in load()["releases"]]
+        json.dump(rels, sys.stdout, indent=1)
+        return 0
+    if args.release:
+        if not args.date:
+            raise SystemExit("--release needs --date")
+        data = release(load(), args.release, args.date, args.title)
+        with open(SOURCE, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2, ensure_ascii=False)
+            fh.write("\n")
+        print("released %s in changelog.json" % args.release)
+        return 0
     wanted = render(load())
     if not args.check:
         with open(TARGET, "w", encoding="utf-8") as fh:

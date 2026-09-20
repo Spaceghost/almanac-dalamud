@@ -1,14 +1,16 @@
-# On a v* tag: build the Dalamud plugin on a GitHub-hosted runner, package it, and
-# publish it as a GitHub Release whose asset URLs the plugin repository listing points at.
+# On a v* tag pushed by tools/release.sh: build the Dalamud plugin on a GitHub-hosted
+# runner, package it, and publish the GitHub Release the plugin repository listing
+# points at.
 #
-#   v0.1.0          a stable release. .../releases/latest/download/latest.zip and
-#                   pluginmaster.json are the URLs spacegho.st/mods/ffxiv/plugins.json
-#                   serves; both keep working across releases because the names never change.
-#   v0.1.1-test.1   a test build. Published as a prerelease under its own tag, and copied
-#                   onto the floating `testing` release, so
-#                   .../releases/download/testing/latest.zip is always the newest test
-#                   build. Players opt in per plugin with the installer's testing
-#                   checkbox; nobody on the stable channel sees it.
+#   v0.3.0          stable. .../releases/latest/download/latest.zip and pluginmaster.json
+#                   are what spacegho.st/mods/ffxiv/plugins.json serves; the names never
+#                   change, so neither do the URLs.
+#   v0.3.1-test.1   testing. A prerelease under its own tag, and copied onto the floating
+#                   `testing` prerelease, so .../releases/download/testing/latest.zip is
+#                   always the newest test build. It never touches a stable release.
+#
+# The job refuses a fork, a tag that is not on master, and a tag that does not name the
+# version in the manifest. Notes come from the changelog; see docs/RELEASING.md.
 #
 # Nothing here runs on a machine of the author's, and nothing here needs the game or a
 # Dalamud install: the reference assemblies come from goatcorp's public distribution.
@@ -26,6 +28,8 @@ concurrency:
 
 jobs:
   release:
+    # never from a fork, and only on GitHub's own runners
+    if: github.repository == 'Spaceghost/almanac-dalamud'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -36,14 +40,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0 # check-tag looks for the tag's commit on master, and at older tags
           persist-credentials: false
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: '10.0.x'
 
-      - name: Check the manifest against the tag
-        run: dalamud/tools/check-manifest.py --tag "$GITHUB_REF_NAME"
+      - name: Check the tag against the manifest, the changelog and master
+        run: |
+          tools/releasekit.py check-tag "$GITHUB_REF_NAME"
+          dalamud/tools/check-manifest.py --tag "$GITHUB_REF_NAME"
 
       - name: Fetch the Dalamud reference assemblies
         run: dalamud/tools/fetch-dalamud.sh
@@ -56,9 +63,27 @@ jobs:
 
       - name: Package
         env:
-          # a tag with a pre-release part (v0.1.1-test.1) is a testing build
+          RELEASE_TAG: ${{ github.ref_name }}
+          # a tag with a pre-release part (v0.3.1-test.1) is a testing build
           TESTING: ${{ contains(github.ref_name, '-') && '1' || '0' }}
         run: dalamud/tools/package.sh
+
+      - name: Check the release files, and write SHA256SUMS
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd "$OUT"
+          for f in latest.zip ${{ contains(github.ref_name, '-') && 'pluginmaster-testing.json' || 'pluginmaster.json' }}; do
+            [[ -s "$f" ]] || { echo "::error::$f is missing"; exit 1; }
+          done
+          python3 -c 'import json,sys; json.load(open(sys.argv[1]))' pluginmaster*.json
+          rm -f SHA256SUMS
+          sha256sum -- * >SHA256SUMS
+          cat SHA256SUMS
+          cd "$GITHUB_WORKSPACE"
+          tools/releasekit.py notes "$TAG" --assets "$OUT" >"$RUNNER_TEMP/notes.md"
+          tools/releasekit.py title "$TAG" >"$RUNNER_TEMP/title.txt"
 
       - name: Publish the release for this tag
         env:
@@ -67,18 +92,22 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          pre=()
-          [[ "$TAG" == *-* ]] && pre=(--prerelease)
+          title="$(cat "$RUNNER_TEMP/title.txt")"
+          kind=(--latest)
+          [[ "$TAG" == *-* ]] && kind=(--prerelease --latest=false)
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$OUT"/* --clobber
+            gh release edit "$TAG" --title "$title" --notes-file "$RUNNER_TEMP/notes.md"
           else
-            gh release create "$TAG" "$OUT"/* --verify-tag --title "Almanac $TAG" \
-              --generate-notes "${pre[@]}"
+            gh release create "$TAG" "$OUT"/* --verify-tag --title "$title" \
+              --notes-file "$RUNNER_TEMP/notes.md" "${kind[@]}"
           fi
 
-      # The testing channel is one floating prerelease called `testing`, so the repository
-      # listing can name a download URL that never changes. A stable tag leaves it alone.
-      - name: Move the testing channel onto this build
+      # The testing channel is one floating prerelease called `testing`, so the listing can
+      # name a download URL that never changes. It is a mailbox for the newest test build:
+      # its notes say which tag and commit that is. A stable tag never runs this step, and
+      # this step never touches a stable release.
+      - name: Put this build on the testing channel
         if: contains(github.ref_name, '-')
         env:
           GH_TOKEN: ${{ github.token }}
@@ -87,17 +116,26 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          notes="Rolling testing channel: the newest test build (currently $TAG).
-
-          Opt in per plugin in /xlplugins -> the plugin's entry -> testing, after adding
-          https://spacegho.st/mods/ffxiv/plugins.json as a custom plugin repository."
+          title="$(sed 's/ v[0-9].*//' "$RUNNER_TEMP/title.txt") testing channel"
+          {
+            printf '> [!NOTE]\n> **The rolling testing channel.** It always carries the newest test build: now [%s](https://github.com/%s/releases/tag/%s), commit %s.\n\n' \
+              "$TAG" "$GH_REPO" "$TAG" "${SHA:0:7}"
+            cat "$RUNNER_TEMP/notes.md"
+          } >"$RUNNER_TEMP/testing.md"
           if gh release view testing >/dev/null 2>&1; then
-            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/testing" -f sha="$SHA" -F force=true
-            gh release edit testing --prerelease --notes "$notes"
+            # Moving the tag is a courtesy; the token may not be allowed to, and the
+            # notes name the real tag and commit either way.
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/testing" -f sha="$SHA" -F force=true >/dev/null ||
+              echo "::warning::could not move the testing tag; its release notes name $TAG"
             gh release upload testing "$OUT"/* --clobber
+            # older builds' versioned zips: gone only once the new files are in place
+            gh release view testing --json assets -q '.assets[].name' | while read -r old; do
+              [[ -e "$OUT/$old" ]] || gh release delete-asset testing "$old" --yes
+            done
+            gh release edit testing --prerelease --latest=false --title "$title" --notes-file "$RUNNER_TEMP/testing.md"
           else
-            gh release create testing "$OUT"/* --target "$SHA" --prerelease \
-              --title "Testing channel" --notes "$notes"
+            gh release create testing "$OUT"/* --target "$SHA" --prerelease --latest=false \
+              --title "$title" --notes-file "$RUNNER_TEMP/testing.md"
           fi
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
