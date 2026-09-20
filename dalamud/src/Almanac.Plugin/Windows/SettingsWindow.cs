@@ -143,7 +143,8 @@ public sealed class SettingsWindow : Window
 
         Section("Leaderboard");
         changed |= Text("URL", s.LeaderboardUrl, v => s.LeaderboardUrl = v, w);
-        ImGui.TextDisabled("Nothing is sent unless you press Share in the benchmark window.");
+        changed |= Text("Sign-in URL", s.SignInUrl, v => s.SignInUrl = v, w);
+        ImGui.TextDisabled("Nothing is sent unless you press Share in the benchmark window. Sharing needs a sign-in, made there too.");
 
         if (changed)
             plugin.SaveSettings();

@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -24,6 +25,22 @@ public sealed record HardwareFacts(string GpuModel, string GpuVendor, int VramMb
 
 /// <summary>Model and backend facts for a result.</summary>
 public sealed record ModelFacts(string BackendKind, string? BackendVersion, string Name, string? Family, double? ParamsB, string Quant, int Context);
+
+/// <summary>How a submission ended. 401 is <see cref="SignInRequired"/> (forget the token, link again); 403 is <see cref="Forbidden"/> (do not retry).</summary>
+public enum SubmitOutcome
+{
+    Ok,
+    SignInRequired,
+    Forbidden,
+    Rejected,
+    Unreachable,
+}
+
+/// <summary>The outcome and what to show the player.</summary>
+public sealed record SubmitResult(SubmitOutcome Outcome, string Message)
+{
+    public bool Ok => Outcome == SubmitOutcome.Ok;
+}
 
 /// <summary>Builds and submits results in the v1 format (benchmark/schema/results.schema.json).</summary>
 public static partial class Results
@@ -102,21 +119,28 @@ public static partial class Results
         };
     }
 
-    /// <summary>Posts a result. Returns (ok, message). The caller shows the JSON and asks first.</summary>
-    public static async Task<(bool Ok, string Message)> SubmitAsync(HttpClient http, string leaderboardBase, JsonObject result, CancellationToken ct)
+    /// <summary>
+    /// Posts a result with the player's leaderboard token. The caller shows the JSON and asks first. The message is the
+    /// server's own on a refusal; <see cref="SubmitOutcome.SignInRequired"/> means the token is no good and must be forgotten.
+    /// </summary>
+    public static async Task<SubmitResult> SubmitAsync(HttpClient http, string leaderboardBase, JsonObject result, string? token, CancellationToken ct)
     {
         try
         {
-            using var content = new StringContent(result.ToJsonString(), Encoding.UTF8, "application/json");
-            using var response = await http.PostAsync($"{leaderboardBase.TrimEnd('/')}/api/results", content, ct).ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            if (body.Length > 300)
-                body = body[..300];
-            return (response.IsSuccessStatusCode, response.IsSuccessStatusCode ? "Submitted. Thank you!" : $"HTTP {(int)response.StatusCode}: {body}");
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{leaderboardBase.TrimEnd('/')}/api/results");
+            request.Content = new StringContent(result.ToJsonString(), Encoding.UTF8, "application/json");
+            if (!string.IsNullOrEmpty(token))
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using var response = await http.SendAsync(request, ct).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+                return new SubmitResult(SubmitOutcome.Ok, "Submitted. Thank you!");
+            var status = (int)response.StatusCode;
+            var (_, message) = DeviceLink.ServerMessage(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false), status);
+            return new SubmitResult(status == 401 ? SubmitOutcome.SignInRequired : status == 403 ? SubmitOutcome.Forbidden : SubmitOutcome.Rejected, message);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            return (false, ex.Message);
+            return new SubmitResult(SubmitOutcome.Unreachable, ex.Message);
         }
     }
 
