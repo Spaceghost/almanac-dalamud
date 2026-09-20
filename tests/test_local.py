@@ -239,7 +239,7 @@ def _session_cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, up: bool = Tru
 def test_code_launches_codex_with_an_isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     cfg = _session_cfg(tmp_path, monkeypatch)
     launched: list[Any] = []
-    ns = argparse.Namespace(path=str(tmp_path), prompt="", extra=[], backend="")
+    ns = argparse.Namespace(path=str(tmp_path), prompt="", extra=[], backend="", tool="codex")
     assert local.run_code(cfg, ns, launch=lambda argv, env, cwd: launched.append((argv, env, cwd)) or 0) == 0
     argv, env, cwd = launched[0]
     assert argv[0] == "codex" and cwd == tmp_path.resolve()
@@ -275,18 +275,112 @@ def test_ask_streams_the_answer_and_appends_piped_text(tmp_path: Path, monkeypat
     assert local.run_ask(cfg, argparse.Namespace(question=[], quiet=True, backend=""), stream) == 2
 
 
-def test_claude_is_opt_in(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def _launch_into(launched: list[Any]) -> Any:
+    return lambda argv, env, cwd: launched.append((argv, env, cwd)) or 0
+
+
+def test_code_defaults_to_claude_bare_with_an_isolated_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     cfg = _session_cfg(tmp_path, monkeypatch)
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "cloud-session")
-    ns = argparse.Namespace(path=str(tmp_path), experimental=False, extra=[], backend="")
-    assert local.run_claude(cfg, ns, launch=lambda *_: pytest.fail("must not launch")) == 2
-    assert "experimental" in capsys.readouterr().err
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "cloud-oauth")
     launched: list[Any] = []
-    ns.experimental = True
-    assert local.run_claude(cfg, ns, launch=lambda argv, env, cwd: launched.append((argv, env)) or 0) == 0
-    argv, env = launched[0]
-    assert argv[:2] == ["claude", "--bare"] and env["ANTHROPIC_BASE_URL"] == "http://box" and env["ANTHROPIC_API_KEY"] == "s3cret"
-    assert "ANTHROPIC_AUTH_TOKEN" not in env and env["CLAUDE_CONFIG_DIR"].endswith("local/claude-config")
+    ns = argparse.Namespace(path=str(tmp_path), prompt="", extra=["--verbose"], backend="")  # no --tool, no [local] coder
+    assert local.run_code(cfg, ns, launch=_launch_into(launched)) == 0
+    argv, env, cwd = launched[0]
+    assert argv == ["claude", "--bare", "--verbose"] and cwd == tmp_path.resolve()
+    assert env["ANTHROPIC_BASE_URL"] == "http://box" and env["ANTHROPIC_API_KEY"] == "s3cret" and env["MAX_THINKING_TOKENS"] == "0"
+    assert "ANTHROPIC_AUTH_TOKEN" not in env and "CLAUDE_CODE_OAUTH_TOKEN" not in env
+    assert env["CLAUDE_CONFIG_DIR"] == str(cfg.state_dir / "local" / "claude-config") and "CODEX_HOME" not in env
+    shown = capsys.readouterr()
+    for honest in ("qwen3.5:9b", "32k tokens", "weak at", "no plugins, MCP servers, hooks, CLAUDE.md", "--tool codex"):
+        assert honest in shown.err
+    assert "s3cret" not in shown.err + shown.out
+
+
+def test_one_shot_prompt_reaches_both_tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = _session_cfg(tmp_path, monkeypatch)
+    launched: list[Any] = []
+    for tool in ("claude", "codex"):
+        ns = argparse.Namespace(path=str(tmp_path), prompt="fix the test", extra=["--max-turns", "9"] if tool == "claude" else [], backend="", tool=tool)
+        assert local.run_code(cfg, ns, launch=_launch_into(launched)) == 0
+    claude, codex = launched[0][0], launched[1][0]
+    assert claude[:4] == ["claude", "--bare", "--max-turns", "9"] and claude[claude.index("-p") + 1] == "fix the test"
+    assert claude[claude.index("--permission-mode") + 1] == "acceptEdits" and claude[claude.index("--allowedTools") + 1] == "Bash,Edit,Read,Write"
+    denied = claude[claude.index("--disallowedTools") + 1]
+    assert "Bash(sudo:*)" in denied and "Bash(git push:*)" in denied and "Bash(ssh:*)" in denied
+    assert codex[:2] == ["codex", "exec"] and codex[-1] == "fix the test"
+    assert "-p" not in local.claude_argv() and local.claude_argv(extra=["-c"]) == ["claude", "--bare", "-c"]
+
+
+def test_tool_comes_from_the_flag_then_the_config_then_claude(tmp_path: Path) -> None:
+    everything = lambda name: f"/usr/bin/{name}"
+    assert local.pick_coder(cfg_with(tmp_path, {}), which=everything) == ("claude", "")
+    codex_cfg = cfg_with(tmp_path, {"local": {"coder": "Codex"}})
+    assert local.pick_coder(codex_cfg, which=everything) == ("codex", "")
+    assert local.pick_coder(codex_cfg, "claude", which=everything) == ("claude", "")  # the flag wins
+    tool, notice = local.pick_coder(cfg_with(tmp_path, {"local": {"coder": "aider"}}), which=everything)
+    assert tool == "" and "unknown coder 'aider'" in notice and "claude, codex" in notice
+
+
+def test_missing_tool_falls_back_to_the_other_with_one_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    only = lambda have: (lambda name: f"/usr/bin/{name}" if name == have else None)
+    cfg = cfg_with(tmp_path, {})
+    tool, notice = local.pick_coder(cfg, which=only("codex"))
+    assert tool == "codex" and notice.count("\n") == 0 and "`claude` is not installed" in notice and "using codex" in notice
+    tool, notice = local.pick_coder(cfg, "codex", which=only("claude"))
+    assert tool == "claude" and "`codex` is not installed" in notice and "using claude" in notice
+    tool, notice = local.pick_coder(cfg, which=lambda _: None)
+    assert tool == "" and "@anthropic-ai/claude-code" in notice and "@openai/codex" in notice and "ai chat" in notice
+
+    cfg = _session_cfg(tmp_path, monkeypatch)
+    monkeypatch.setattr(local.shutil, "which", only("codex"))
+    launched: list[Any] = []
+    assert local.run_code(cfg, argparse.Namespace(path=str(tmp_path), prompt="", extra=[], backend="", tool=""), launch=_launch_into(launched)) == 0
+    assert launched[0][0][0] == "codex" and "using codex instead" in capsys.readouterr().err
+    monkeypatch.setattr(local.shutil, "which", lambda _: None)
+    assert local.run_code(cfg, argparse.Namespace(path=str(tmp_path), prompt="", extra=[], backend="", tool=""), launch=lambda *_: pytest.fail("must not launch")) == 1
+    cfg = cfg_with(tmp_path, {"local": {"coder": "vim"}})
+    assert local.run_code(cfg, argparse.Namespace(path=str(tmp_path), prompt="", extra=[], backend="", tool=""), launch=lambda *_: pytest.fail("must not launch")) == 2
+
+
+def test_claude_needs_a_backend_that_serves_the_messages_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    cfg = cfg_with(tmp_path, {"local": {"backends": {"vllm": {"url": "http://vllm", "kind": "openai"}}}})
+    monkeypatch.setattr(local.httpx, "get", fake_get({"http://vllm/": FakeResponse(200, {"data": []})}))
+    monkeypatch.setattr(local.shutil, "which", lambda name: f"/usr/bin/{name}")
+    ns = argparse.Namespace(path=str(tmp_path), prompt="", extra=[], backend="", tool="claude")
+    assert local.run_code(cfg, ns, launch=lambda *_: pytest.fail("must not launch")) == 1
+    assert "--tool codex" in capsys.readouterr().err
+    launched: list[Any] = []
+    ns.tool = "codex"
+    assert local.run_code(cfg, ns, launch=_launch_into(launched)) == 0 and launched[0][0][0] == "codex"
+
+
+def test_ai_claude_is_an_alias_and_the_old_flag_still_parses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = _session_cfg(tmp_path, monkeypatch)
+    cfg.raw["local"]["coder"] = "codex"  # the alias means claude whatever the config says
+    launched: list[Any] = []
+    for argv in (["claude", str(tmp_path)], ["claude", str(tmp_path), "--experimental", "-p", "fix it"]):
+        ns = parse(*argv)
+        assert ns.local_func is local.run_claude
+        assert local.run_claude(cfg, ns, launch=_launch_into(launched)) == 0
+    assert launched[0][0] == ["claude", "--bare"] and launched[1][0][:4] == ["claude", "--bare", "-p", "fix it"]
+
+
+def test_no_subcommand_in_a_repo_starts_the_default_coder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    cfg = _session_cfg(tmp_path, monkeypatch)
+    monkeypatch.setattr(local.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(local.sys.stdout, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(local.subprocess, "run", lambda *a, **k: argparse.Namespace(returncode=0))
+    monkeypatch.setattr(local, "run_status", lambda cfg, ns: 0)
+    started: list[str] = []
+    monkeypatch.setattr(local, "run_code", lambda cfg, ns: started.append(f"code:{ns.tool or 'default'}") or 0)
+    monkeypatch.setattr(local, "run_chat", lambda cfg, ns: started.append("chat") or 0)
+    assert local.run_default(cfg, parse()) == 0
+    monkeypatch.setattr(local.shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+    assert local.run_default(cfg, parse()) == 0  # claude alone is enough
+    monkeypatch.setattr(local.shutil, "which", lambda _: None)
+    assert local.run_default(cfg, parse()) == 0
+    assert started == ["code:default", "code:default", "chat"]
 
 
 # -- arguments -------------------------------------------------------------------------------
@@ -299,13 +393,15 @@ def parse(*argv: str) -> argparse.Namespace:
 def test_argument_handling() -> None:
     assert parse().local_func is local.run_default
     ns = parse("code")
-    assert (ns.local_func, ns.path, ns.prompt, ns.extra, ns.backend) == (local.run_code, ".", "", [], "")
-    ns = parse("code", "~/src/x", "-p", "fix it", "-b", "box", "--", "--search")
-    assert (ns.path, ns.prompt, ns.backend, ns.extra) == ("~/src/x", "fix it", "box", ["--search"])
+    assert (ns.local_func, ns.path, ns.prompt, ns.extra, ns.backend, ns.tool) == (local.run_code, ".", "", [], "", "")
+    ns = parse("code", "~/src/x", "-p", "fix it", "-b", "box", "--tool", "codex", "--", "--search")
+    assert (ns.path, ns.prompt, ns.backend, ns.tool, ns.extra) == ("~/src/x", "fix it", "box", "codex", ["--search"])
+    with pytest.raises(SystemExit):
+        parse("code", "--tool", "aider")
     ns = parse("ask", "-q", "why", "is", "it", "red")
     assert ns.local_func is local.run_ask and ns.question == ["why", "is", "it", "red"] and ns.quiet
     assert parse("status", "--no-probe", "--json").no_probe and parse("use").name is None and parse("use", "auto").name == "auto"
-    assert parse("chat", "--backend", "box").backend == "box" and parse("claude").experimental is False
+    assert parse("chat", "--backend", "box").backend == "box" and parse("claude").tool == ""
     with pytest.raises(SystemExit):
         parse("frobnicate")
 

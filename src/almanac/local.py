@@ -3,11 +3,11 @@
 Claude ran out?
 
     ai                  # what is up, pick the best backend, start a session
-    ai code [path]      # coding session in a repo (Codex CLI, hardened local preset)
+    ai code [path]      # coding session in a repo (Claude Code, bare; --tool codex for Codex)
     ai ask "question"   # one answer; pipe a file in with  ai ask "explain" < file
 
 Also: ``ai status``, ``ai chat``, ``ai use <backend>|auto``, ``ai webui``,
-``ai limits`` and the opt-in ``ai claude``.
+``ai limits``; ``ai claude`` is ``ai code --tool claude``.
 
 Backends come from ``[local.backends.<name>]`` in the config; without that
 section the ``[autopilot.pool.*]`` backends are used, and without those the
@@ -49,17 +49,21 @@ What to expect (a ~9B local model is not Claude):
   so        give it one small task with the file names and the test command, read
             every diff, and keep the big jobs for when Claude is back"""
 
-CLAUDE_WARNING = """\
-Claude Code on the local model: opt-in and lightly tested (README "When Claude runs out").
-  - It runs with --bare and its own config directory: no plugins, MCP servers, hooks,
-    CLAUDE.md or memory. Bare, the opening request is ~1.5k tokens with three tools
-    (Bash, Edit, Read). Measured on a Quadro P4000 with qwen3.5:9b: three tiny
-    red->green tasks passed (31-67 s each), no failed tool calls.
-  - Do not point your normal `claude` at the gateway instead: its full tool list
-    (24 tools) is ~28k tokens, which fills a 32k context before your first word.
-    It passed one trivial fix in 119 s and has no room left for real work.
-  - Nothing larger than a one-file change was tested. `ai code` (Codex, hardened
-    preset) is the path with more mileage."""
+CODERS = ("claude", "codex")
+INSTALL = {"claude": "npm install -g @anthropic-ai/claude-code", "codex": "npm install -g @openai/codex"}
+
+CLAUDE_NOTES = """\
+Claude Code on the local model (GUIDE "Claude Code on the local model" has the measurements):
+  - bare mode, its own config directory: no plugins, MCP servers, hooks, CLAUDE.md or
+    memory, and none of your ~/.claude. The opening request is ~1.5k tokens with three
+    tools (Bash, Edit, Read), which is what leaves a 32k context free for your code.
+  - thinking is off (MAX_THINKING_TOKENS=0): over six tasks it was a little quicker
+    (302s against 332s) and passed the same six, so it is the default; turn it back on
+    with MAX_THINKING_TOKENS in the environment if a task needs the reasoning.
+  - do not point your everyday `claude` at the gateway instead: its full tool list
+    (24 tools) is ~28k tokens and fills a 32k context before your first word.
+  - `ai code --tool codex` (or coder = "codex" under [local]) is the Codex CLI with
+    autopilot's hardened preset, sandboxed to the directory with no network."""
 
 
 # -- backends ----------------------------------------------------------------
@@ -321,8 +325,20 @@ def codex_argv(backend: LocalBackend, worktree: Path, prompt: str, interactive: 
     return argv
 
 
-def claude_argv(extra: list[str] | None = None) -> list[str]:
-    return ["claude", "--bare", *(extra or [])]
+def claude_argv(prompt: str = "", extra: list[str] | None = None) -> list[str]:
+    """``claude --bare``; with a prompt, one headless task under autopilot's permission rules.
+
+    Headless Claude Code cannot ask, so edits are accepted, the tool list is
+    named, and the commands autopilot always denies (sudo, git push, gh, ssh...)
+    are denied here too. Unlike Codex there is no sandbox of its own around it.
+    """
+    from .autopilot.coder import DENY_ALWAYS, DENY_SSH
+
+    argv = ["claude", "--bare", *(extra or [])]
+    if prompt:
+        argv += ["-p", prompt, "--permission-mode", "acceptEdits", "--allowedTools", "Bash,Edit,Read,Write",
+                 "--disallowedTools", ",".join(DENY_ALWAYS + DENY_SSH)]
+    return argv
 
 
 def claude_env(backend: LocalBackend) -> dict[str, str]:
@@ -332,7 +348,24 @@ def claude_env(backend: LocalBackend) -> dict[str, str]:
         "ANTHROPIC_MODEL": "claude-sonnet-4-5", "ANTHROPIC_SMALL_FAST_MODEL": "claude-haiku-4-5",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "API_TIMEOUT_MS": "900000",
         "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "4096",
+        # a 9B model "thinking" before every tool call: ~3x the wall time, same result
+        "MAX_THINKING_TOKENS": "0",
     }
+
+
+def pick_coder(cfg: Config, requested: str = "", which: Callable[[str], str | None] | None = None) -> tuple[str, str]:
+    """(tool, notice). ``--tool``, else ``[local] coder``, else claude; the other one when it is not installed."""
+    which = which or shutil.which
+    wanted = (requested or str(cfg.section("local").get("coder", "")) or CODERS[0]).lower()
+    if wanted not in CODERS:
+        return "", f"unknown coder {wanted!r}: use one of {', '.join(CODERS)} (--tool, or coder under [local])"
+    other = CODERS[1 - CODERS.index(wanted)]
+    if which(wanted):
+        return wanted, ""
+    if which(other):
+        return other, f"`{wanted}` is not installed ({INSTALL[wanted]}); using {other} instead"
+    return "", ("`ai code` needs Claude Code or the Codex CLI on PATH:\n  " + "\n  ".join(INSTALL.values())
+                + "\n`ai chat` and `ai ask` work without them.")
 
 
 def _say(text: str, quiet: bool = False) -> None:
@@ -340,8 +373,8 @@ def _say(text: str, quiet: bool = False) -> None:
         print(text, file=sys.stderr)
 
 
-def _pick(cfg: Config, ns: argparse.Namespace, speed: bool = False) -> Probe | None:
-    backends = load_backends(cfg)
+def _pick(cfg: Config, ns: argparse.Namespace, speed: bool = False, kinds: tuple[str, ...] = ()) -> Probe | None:
+    backends = [b for b in load_backends(cfg) if not kinds or b.kind in kinds]
     probes = discover(backends, speed=speed, timeout=float(cfg.section("local").get("probe_timeout", 45)))
     wanted = preferred_name(cfg, getattr(ns, "backend", "") or "")
     chosen = choose(probes, wanted)
@@ -448,15 +481,25 @@ def _exec(argv: list[str], env: dict[str, str], cwd: Path) -> int:
 
 
 def run_code(cfg: Config, ns: argparse.Namespace, launch: Callable[[list[str], dict[str, str], Path], int] = _exec) -> int:
-    from .autopilot.coder import local_coder_env
-
     worktree = Path(ns.path).expanduser().resolve()
     if not worktree.is_dir():
         print(f"{worktree} is not a directory", file=sys.stderr)
         return 2
-    if shutil.which("codex") is None:
-        print("`ai code` needs the Codex CLI (`codex` on PATH): npm install -g @openai/codex\n`ai chat` and `ai ask` work without it.", file=sys.stderr)
-        return 1
+    tool, notice = pick_coder(cfg, getattr(ns, "tool", "") or "")
+    if notice:
+        print(notice, file=sys.stderr)
+    if not tool:
+        return 2 if notice.startswith("unknown") else 1
+    prompt, extra = getattr(ns, "prompt", "") or "", list(getattr(ns, "extra", None) or [])
+    if tool == "claude":
+        return _code_claude(cfg, ns, worktree, prompt, extra, launch)
+    return _code_codex(cfg, ns, worktree, prompt, extra, launch)
+
+
+def _code_codex(cfg: Config, ns: argparse.Namespace, worktree: Path, prompt: str, extra: list[str],
+                launch: Callable[[list[str], dict[str, str], Path], int]) -> int:
+    from .autopilot.coder import local_coder_env
+
     chosen = _pick(cfg, ns)
     if chosen is None:
         return 1
@@ -464,32 +507,31 @@ def run_code(cfg: Config, ns: argparse.Namespace, launch: Callable[[list[str], d
     _say(f"\ncoding in {worktree} with Codex: sandboxed to this directory, no network, no web search.\n")
     home = cfg.state_dir / "local" / "codex-home"  # never the owner's ~/.codex
     home.mkdir(parents=True, exist_ok=True, mode=0o700)
-    argv = codex_argv(chosen.backend, worktree, ns.prompt or "", interactive=not ns.prompt, extra=ns.extra)
+    argv = codex_argv(chosen.backend, worktree, prompt, interactive=not prompt, extra=extra)
     env = {**os.environ, **local_coder_env(f"{chosen.backend.base_url}/v1", chosen.backend.token(), str(home))}
     return launch(argv, env, worktree)
 
 
-def run_claude(cfg: Config, ns: argparse.Namespace, launch: Callable[[list[str], dict[str, str], Path], int] = _exec) -> int:
-    if not (ns.experimental or cfg.section("local").get("allow_claude")):
-        print(CLAUDE_WARNING + "\n\nOpt in with `ai claude --experimental`, or allow_claude = true under [local].", file=sys.stderr)
-        return 2
-    worktree = Path(ns.path).expanduser().resolve()
-    if shutil.which("claude") is None or not worktree.is_dir():
-        print("needs `claude` on PATH and an existing directory", file=sys.stderr)
-        return 1
-    backends = [b for b in load_backends(cfg) if b.kind in ("almanac", "ollama")]  # they serve /v1/messages
-    probes = discover(backends, speed=False)
-    chosen = choose(probes, preferred_name(cfg, ns.backend or ""))
+def _code_claude(cfg: Config, ns: argparse.Namespace, worktree: Path, prompt: str, extra: list[str],
+                 launch: Callable[[list[str], dict[str, str], Path], int]) -> int:
+    chosen = _pick(cfg, ns, kinds=("almanac", "ollama"))  # the kinds that serve the Anthropic Messages API (/v1/messages)
     if chosen is None:
-        print("no reachable backend serves the Anthropic Messages API (kind almanac or ollama)", file=sys.stderr)
+        _say("Claude Code needs a backend of kind almanac or ollama; `ai code --tool codex` also works with kind openai")
         return 1
-    _say(banner(chosen) + "\n\n" + CLAUDE_WARNING + "\n")
+    _say(banner(chosen) + "\n\n" + CLAUDE_NOTES)
+    _say(f"\ncoding in {worktree} with Claude Code (bare){': one task, edits accepted, no sandbox' if prompt else ''}.\n")
     config_dir = cfg.state_dir / "local" / "claude-config"  # never the owner's ~/.claude
     config_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     env = {**os.environ, **claude_env(chosen.backend), "CLAUDE_CONFIG_DIR": str(config_dir)}
-    for name in ("ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"):
+    for name in ("ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"):  # the cloud login must not reach a local backend
         env.pop(name, None)
-    return launch(claude_argv(ns.extra), env, worktree)
+    return launch(claude_argv(prompt, extra), env, worktree)
+
+
+def run_claude(cfg: Config, ns: argparse.Namespace, launch: Callable[[list[str], dict[str, str], Path], int] = _exec) -> int:
+    """``ai claude`` is ``ai code --tool claude`` (kept so nothing breaks)."""
+    ns.tool = "claude"
+    return run_code(cfg, ns, launch)
 
 
 def run_use(cfg: Config, ns: argparse.Namespace) -> int:
@@ -531,8 +573,8 @@ def run_default(cfg: Config, ns: argparse.Namespace) -> int:
         print('next: ai code [path] | ai chat | ai ask "question"')
         return 0
     in_repo = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True).returncode == 0
-    ns.backend, ns.path, ns.prompt, ns.extra, ns.quiet = "", ".", "", [], False
-    if in_repo and shutil.which("codex"):
+    ns.backend, ns.path, ns.prompt, ns.extra, ns.quiet, ns.tool = "", ".", "", [], False, ""
+    if in_repo and any(shutil.which(tool) for tool in CODERS):
         print("this is a git repo: starting a coding session (`ai chat` for plain chat)\n")
         return run_code(cfg, ns)
     print("starting plain chat (`ai code [path]` for a coding session in a repo)\n")
@@ -554,10 +596,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     p = add("status", run_status, "which local backends are up, how fast, busy or free", backend=False)
     p.add_argument("--no-probe", action="store_true", help="health only; skip the ~60-token speed probe")
     p.add_argument("--json", action="store_true")
-    p = add("code", run_code, "coding session in a repo: Codex CLI on the local model, hardened preset")
-    p.add_argument("path", nargs="?", default=".", help="repository or directory (default: here)")
-    p.add_argument("-p", "--prompt", default="", help="do this one task and exit, instead of an interactive session")
-    p.add_argument("extra", nargs="*", help="after --: extra arguments for codex")
+    def coder(name: str, func: Any, help_text: str) -> None:
+        p = add(name, func, help_text)
+        p.add_argument("path", nargs="?", default=".", help="repository or directory (default: here)")
+        p.add_argument("-p", "--prompt", default="", help="do this one task and exit, instead of an interactive session")
+        p.add_argument("--tool", "-t", choices=CODERS, default="", help='claude (default) or codex; also coder = "..." under [local]. '
+                       "The other one is used when the chosen one is not installed")
+        p.add_argument("--experimental", action="store_true", help=argparse.SUPPRESS)  # once required by `ai claude`
+        p.add_argument("extra", nargs="*", help="after --: extra arguments for the coding tool")
+
+    coder("code", run_code, "coding session in a repo on the local model: Claude Code in bare mode, or --tool codex (hardened preset)")
     p = add("chat", run_chat, "plain interactive chat (no tools)")
     p = add("ask", run_ask, "one question, one answer; text piped in is appended")
     p.add_argument("question", nargs="*")
@@ -566,10 +614,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     p.add_argument("name", nargs="?")
     add("webui", run_webui, "print the Open WebUI address for browser chat", backend=False)
     add("limits", run_limits, "what a small local model is and is not good at", backend=False)
-    p = add("claude", run_claude, "EXPERIMENTAL: Claude Code itself on the local model (opt-in; read the warning)")
-    p.add_argument("path", nargs="?", default=".")
-    p.add_argument("--experimental", action="store_true", help="yes, I read the warning")
-    p.add_argument("extra", nargs="*", help="after --: extra arguments for claude")
+    coder("claude", run_claude, "the same as `code --tool claude`")
 
 
 def dispatch(cfg: Config, ns: argparse.Namespace) -> int:

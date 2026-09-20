@@ -13,6 +13,12 @@ Statuses mean exactly what they mean in the What's new view in game:
 * **BETA** — merged, but not yet verified in game.
 * **SOON** — still being built.
 
+## [Unreleased] — In the workshop
+
+Merged, not in a release yet.
+
+* `ai code` now starts Claude Code on your local model by default instead of Codex: over six red-to-green tasks on the P4000 both passed all six, Claude in 302 seconds against 518. `ai code --tool codex` (or `coder` under `[local]`) still picks Codex, and whichever tool is missing falls back to the other.
+
 ## [0.2.0] — Released 2026-09-20
 
 BETA entries are in this release but have not been verified in game yet; they become NEW or FIX once they have been seen working.

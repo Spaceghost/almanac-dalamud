@@ -1,91 +1,103 @@
 {
-  "_comment": "The changelog. tools/changelog.py renders CHANGELOG.md from this file, and the plugin shows the same entries in game under What's new (the file is embedded in Almanac.Core). Every user-visible change edits this file in the same commit. Statuses: new/fix (in a release, seen working), beta (merged, not yet verified in its real setting), next (still being built).",
-  "project": "Almanac",
-  "intro": "Every change to Almanac a user can see, newest first: the local agent and its engine, and the Almanac plugin in FFXIV.\n\nAlmanac's releases are built and tested without the game. Everything below is merged and unit-tested with fakes; what has and has not actually been run against a real model server, a real game or real hardware is listed in the README's \"Untested\" section, and each entry says so for itself.",
-  "releases": [
+ "_comment": "The changelog. tools/changelog.py renders CHANGELOG.md from this file, and the plugin shows the same entries in game under What's new (the file is embedded in Almanac.Core). Every user-visible change edits this file in the same commit. Statuses: new/fix (in a release, seen working), beta (merged, not yet verified in its real setting), next (still being built).",
+ "project": "Almanac",
+ "intro": "Every change to Almanac a user can see, newest first: the local agent and its engine, and the Almanac plugin in FFXIV.\n\nAlmanac's releases are built and tested without the game. Everything below is merged and unit-tested with fakes; what has and has not actually been run against a real model server, a real game or real hardware is listed in the README's \"Untested\" section, and each entry says so for itself.",
+ "releases": [
+  {
+   "version": "next",
+   "title": "In the workshop",
+   "date": "",
+   "blurb": "Merged, not in a release yet.",
+   "items": [
     {
-      "version": "0.2.0",
-      "title": "Released 2026-09-20",
-      "date": "2026-09-20",
-      "blurb": "BETA entries are in this release but have not been verified in game yet; they become NEW or FIX once they have been seen working.",
-      "items": [
-        {
-          "status": "beta",
-          "text": "Sharing a benchmark result from the game signs you in first: the leaderboard now takes results only from a signed-in player, so Share shows a short code, opens spacegho.st in your browser to approve Almanac with GitHub or XIVAuth, and sends the result once you have, without freezing the window while it waits. The token is kept with the plugin's settings and never shown; Sign out revokes it. If the server refuses the token it is forgotten and you are asked to sign in again, and whatever the server says is shown as it is. The plugin is 0.2.0, the first version that can share. Tested with a fake server only; not yet run in game or against the live site."
-        },
-        {
-          "status": "beta",
-          "text": "`almanac bench --submit` signs you in first: the leaderboard now takes results only from a signed-in player, so the first submit shows a short code, opens spacegho.st to approve Almanac with GitHub or XIVAuth, and carries on by itself. The token is kept in the state directory with mode 0600, is never printed, and `almanac bench --unlink` revokes and deletes it. A refused token is dropped and linked again once; the server's own message is shown when it says no. The CLI is 0.2.0, the first version that can submit. Tested with a fake server only; not yet run against the live site."
-        },
-        {
-          "status": "beta",
-          "text": "`almanac local`, also installed as `ai`: the front door for when the cloud model runs out. `ai status` shows which of your own backends are up, the GPU, model, context, a measured tok/s and busy or free; `ai code [path]` starts Codex on the best one with autopilot's hardened local preset, `ai chat` and `ai ask` are plain chat, `ai use` pins a backend, and every session opens by saying what a small model is and is not good at. Backends come from `[local.backends]` in the config. `ai claude` runs Claude Code itself on the local model, bare, behind an explicit opt-in. Run for real against two Ollama backends behind almanac gateways (a Quadro P4000 and an RTX 4060, qwen3.5:9b): status, ask, and one-shot red-to-green coding tasks; an interactive session was only seen to start."
-        },
-        {
-          "status": "beta",
-          "text": "The native SQLite in the plugin download is 3.53.3, past the 3.50.2 that fixes CVE-2025-6965: Microsoft.Data.Sqlite 10.0.12 brings SQLitePCLRaw 2.1.12 in place of the flagged 2.1.11, and a test now fails if the SQLite that actually loads is ever older than the fixed release. The storage file and its schema are unchanged. Not yet seen loading inside Dalamud."
-        },
-        {
-          "status": "beta",
-          "text": "Autopilot: a task queue and loop that picks work up from GitHub issues, the inbox, vote tallies and failing CI, plans it with a pool of local models (roles, health checks and failover), and runs coding sessions in sandboxed git worktrees with a hybrid cloud/local coder that falls back to a local model when the cloud hits its limit. Budget caps, a kill switch, a durable log and a morning digest come with it. Nothing here has run against a real coding CLI, a real model backend or a real pull request yet."
-        },
-        {
-          "status": "beta",
-          "text": "Nothing autopilot writes leaves its sandbox without you: each change waits on an approval request you see in game, deny paths and caps are enforced before a session starts, and `almanac autopilot pending` lists what is parked. Not yet exercised against XivMcp's real approval tickets."
-        },
-        {
-          "status": "beta",
-          "text": "Install Almanac in the game without a .NET SDK: it is published as a normal Dalamud plugin from the author's repository at spacegho.st/mods/ffxiv/plugins.json. A `v*` tag builds, tests, packages and publishes it on GitHub's own runners, and a pre-release tag goes to the testing channel instead. Building it yourself still works. No release has been cut yet."
-        },
-        {
-          "status": "beta",
-          "text": "The plugin download is only what the game loads — the managed assemblies, the manifest and the one native SQLite for win-x64 — instead of the 49 MB the first packaging run produced; the build now fails if the manifest or the plugin assembly is missing from the zip."
-        },
-        {
-          "status": "beta",
-          "text": "Almanac in game: a Dalamud plugin with a setup wizard that finds your local model server, reads the GPU through DXGI, subtracts what the game needs and recommends models for the VRAM that is left. Not yet run in a real game: the windows, DXGI detection under Wine/DXVK and the SQLite native library inside Dalamud are all unverified."
-        },
-        {
-          "status": "beta",
-          "text": "Chat window with conversation threads, branching and replies streamed as they are written, running the agent loop against XivMcp's tools. Not yet run in game."
-        },
-        {
-          "status": "beta",
-          "text": "XivMcp is found over Dalamud IPC and hands Almanac its own client token, so no token is copied or stored here, and tools that change the game still go through XivMcp's in-game approval. Almanac's own `Almanac.Ask` IPC lets another plugin ask a question — this is what a terminal's /ask uses. Not yet run in game."
-        },
-        {
-          "status": "beta",
-          "text": "Benchmark window: run the ffxiv-core suite against your own model server, see the score and past runs, and share a result with the community leaderboard only when you press Share. Live benchmark mode has not been run in game."
-        },
-        {
-          "status": "beta",
-          "text": "Almanac.Core carries the whole engine with no game and no Python in it: a streaming OpenAI-compatible chat client with a prompted tool-calling fallback for models that lack native tool calls, an MCP client for XivMcp, an agent loop that validates every tool call against its schema, local server detection, VRAM-tiered model recommendations, the benchmark runner and scorer, and one SQLite file for settings, threads, runs and caches. 70 tests with fakes and no network."
-        },
-        {
-          "status": "beta",
-          "text": "`almanac bench`: headless benchmark runs of the ffxiv-core suite against any OpenAI-compatible backend, with mock fixtures or live XivMcp tools, a prompted fallback when the backend refuses tools, peak VRAM sampled, every run kept in bench.sqlite, and a result document submitted only on request. Not yet run against a real model server or live XivMcp."
-        },
-        {
-          "status": "beta",
-          "text": "Conversation threads and machine-readable streaming for the CLI: `ask` and `chat` take --thread, --continue or --new-thread, `ask --stream-json` prints one JSON object per line and never prompts (for programs such as an in-game panel), and `almanac threads` lists, shows and deletes them."
-        },
-        {
-          "status": "beta",
-          "text": "Model residency: while a process you name is running, the gateway loads the model and keeps it pinned in VRAM, re-asserting the pin after a backend restart, and restores the idle timeout when the process exits. Pins respect the memory guard — they are deferred, not failed — and the state shows in /healthz and through the model_residency tool."
-        },
-        {
-          "status": "beta",
-          "text": "The model gateway: auth, model mapping and a memory guard in front of your local backend."
-        },
-        {
-          "status": "beta",
-          "text": "The headless agent and the `almanac` CLI over your own Markdown knowledge base, indexed with SQLite FTS5, with tools declared in TOML, confirmation before anything that changes the world, and an audit log. Replies stream, and the agent can use other MCP servers (such as XivMcp) while respecting their tiers."
-        },
-        {
-          "status": "beta",
-          "text": "Almanac as an MCP server over stdio and streamable HTTP, so Claude Code and Codex can use the same knowledge and tools. MCP elicitation has been tested only with the MCP SDK's own client."
-        }
-      ]
+     "status": "beta",
+     "text": "`ai code` now starts Claude Code on your local model by default instead of Codex: over six red-to-green tasks on the P4000 both passed all six, Claude in 302 seconds against 518. `ai code --tool codex` (or `coder` under `[local]`) still picks Codex, and whichever tool is missing falls back to the other."
     }
-  ]
+   ]
+  },
+  {
+   "version": "0.2.0",
+   "title": "Released 2026-09-20",
+   "date": "2026-09-20",
+   "blurb": "BETA entries are in this release but have not been verified in game yet; they become NEW or FIX once they have been seen working.",
+   "items": [
+    {
+     "status": "beta",
+     "text": "Sharing a benchmark result from the game signs you in first: the leaderboard now takes results only from a signed-in player, so Share shows a short code, opens spacegho.st in your browser to approve Almanac with GitHub or XIVAuth, and sends the result once you have, without freezing the window while it waits. The token is kept with the plugin's settings and never shown; Sign out revokes it. If the server refuses the token it is forgotten and you are asked to sign in again, and whatever the server says is shown as it is. The plugin is 0.2.0, the first version that can share. Tested with a fake server only; not yet run in game or against the live site."
+    },
+    {
+     "status": "beta",
+     "text": "`almanac bench --submit` signs you in first: the leaderboard now takes results only from a signed-in player, so the first submit shows a short code, opens spacegho.st to approve Almanac with GitHub or XIVAuth, and carries on by itself. The token is kept in the state directory with mode 0600, is never printed, and `almanac bench --unlink` revokes and deletes it. A refused token is dropped and linked again once; the server's own message is shown when it says no. The CLI is 0.2.0, the first version that can submit. Tested with a fake server only; not yet run against the live site."
+    },
+    {
+     "status": "beta",
+     "text": "`almanac local`, also installed as `ai`: the front door for when the cloud model runs out. `ai status` shows which of your own backends are up, the GPU, model, context, a measured tok/s and busy or free; `ai code [path]` starts Codex on the best one with autopilot's hardened local preset, `ai chat` and `ai ask` are plain chat, `ai use` pins a backend, and every session opens by saying what a small model is and is not good at. Backends come from `[local.backends]` in the config. `ai claude` runs Claude Code itself on the local model, bare, behind an explicit opt-in. Run for real against two Ollama backends behind almanac gateways (a Quadro P4000 and an RTX 4060, qwen3.5:9b): status, ask, and one-shot red-to-green coding tasks; an interactive session was only seen to start."
+    },
+    {
+     "status": "beta",
+     "text": "The native SQLite in the plugin download is 3.53.3, past the 3.50.2 that fixes CVE-2025-6965: Microsoft.Data.Sqlite 10.0.12 brings SQLitePCLRaw 2.1.12 in place of the flagged 2.1.11, and a test now fails if the SQLite that actually loads is ever older than the fixed release. The storage file and its schema are unchanged. Not yet seen loading inside Dalamud."
+    },
+    {
+     "status": "beta",
+     "text": "Autopilot: a task queue and loop that picks work up from GitHub issues, the inbox, vote tallies and failing CI, plans it with a pool of local models (roles, health checks and failover), and runs coding sessions in sandboxed git worktrees with a hybrid cloud/local coder that falls back to a local model when the cloud hits its limit. Budget caps, a kill switch, a durable log and a morning digest come with it. Nothing here has run against a real coding CLI, a real model backend or a real pull request yet."
+    },
+    {
+     "status": "beta",
+     "text": "Nothing autopilot writes leaves its sandbox without you: each change waits on an approval request you see in game, deny paths and caps are enforced before a session starts, and `almanac autopilot pending` lists what is parked. Not yet exercised against XivMcp's real approval tickets."
+    },
+    {
+     "status": "beta",
+     "text": "Install Almanac in the game without a .NET SDK: it is published as a normal Dalamud plugin from the author's repository at spacegho.st/mods/ffxiv/plugins.json. A `v*` tag builds, tests, packages and publishes it on GitHub's own runners, and a pre-release tag goes to the testing channel instead. Building it yourself still works. No release has been cut yet."
+    },
+    {
+     "status": "beta",
+     "text": "The plugin download is only what the game loads — the managed assemblies, the manifest and the one native SQLite for win-x64 — instead of the 49 MB the first packaging run produced; the build now fails if the manifest or the plugin assembly is missing from the zip."
+    },
+    {
+     "status": "beta",
+     "text": "Almanac in game: a Dalamud plugin with a setup wizard that finds your local model server, reads the GPU through DXGI, subtracts what the game needs and recommends models for the VRAM that is left. Not yet run in a real game: the windows, DXGI detection under Wine/DXVK and the SQLite native library inside Dalamud are all unverified."
+    },
+    {
+     "status": "beta",
+     "text": "Chat window with conversation threads, branching and replies streamed as they are written, running the agent loop against XivMcp's tools. Not yet run in game."
+    },
+    {
+     "status": "beta",
+     "text": "XivMcp is found over Dalamud IPC and hands Almanac its own client token, so no token is copied or stored here, and tools that change the game still go through XivMcp's in-game approval. Almanac's own `Almanac.Ask` IPC lets another plugin ask a question — this is what a terminal's /ask uses. Not yet run in game."
+    },
+    {
+     "status": "beta",
+     "text": "Benchmark window: run the ffxiv-core suite against your own model server, see the score and past runs, and share a result with the community leaderboard only when you press Share. Live benchmark mode has not been run in game."
+    },
+    {
+     "status": "beta",
+     "text": "Almanac.Core carries the whole engine with no game and no Python in it: a streaming OpenAI-compatible chat client with a prompted tool-calling fallback for models that lack native tool calls, an MCP client for XivMcp, an agent loop that validates every tool call against its schema, local server detection, VRAM-tiered model recommendations, the benchmark runner and scorer, and one SQLite file for settings, threads, runs and caches. 70 tests with fakes and no network."
+    },
+    {
+     "status": "beta",
+     "text": "`almanac bench`: headless benchmark runs of the ffxiv-core suite against any OpenAI-compatible backend, with mock fixtures or live XivMcp tools, a prompted fallback when the backend refuses tools, peak VRAM sampled, every run kept in bench.sqlite, and a result document submitted only on request. Not yet run against a real model server or live XivMcp."
+    },
+    {
+     "status": "beta",
+     "text": "Conversation threads and machine-readable streaming for the CLI: `ask` and `chat` take --thread, --continue or --new-thread, `ask --stream-json` prints one JSON object per line and never prompts (for programs such as an in-game panel), and `almanac threads` lists, shows and deletes them."
+    },
+    {
+     "status": "beta",
+     "text": "Model residency: while a process you name is running, the gateway loads the model and keeps it pinned in VRAM, re-asserting the pin after a backend restart, and restores the idle timeout when the process exits. Pins respect the memory guard — they are deferred, not failed — and the state shows in /healthz and through the model_residency tool."
+    },
+    {
+     "status": "beta",
+     "text": "The model gateway: auth, model mapping and a memory guard in front of your local backend."
+    },
+    {
+     "status": "beta",
+     "text": "The headless agent and the `almanac` CLI over your own Markdown knowledge base, indexed with SQLite FTS5, with tools declared in TOML, confirmation before anything that changes the world, and an audit log. Replies stream, and the agent can use other MCP servers (such as XivMcp) while respecting their tiers."
+    },
+    {
+     "status": "beta",
+     "text": "Almanac as an MCP server over stdio and streamable HTTP, so Claude Code and Codex can use the same knowledge and tools. MCP elicitation has been tested only with the MCP SDK's own client."
+    }
+   ]
+  }
+ ]
 }
