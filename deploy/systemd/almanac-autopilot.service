@@ -1,0 +1,38 @@
+# almanac autopilot: the autonomous coding + game companion loop (`almanac autopilot run`).
+# Installed by deploy/install.sh into ~/.config/systemd/user/ but NEVER enabled
+# by it. Read the README's "Autopilot" section, set [autopilot] in your config
+# (dry_run = true first), then: systemctl --user enable --now almanac-autopilot
+#
+# Exit 3 means the kill switch file exists: not restarted until you delete it.
+# `almanac autopilot stop` exits cleanly after the current step (also not restarted).
+[Unit]
+Description=almanac autopilot (autonomous coding + game companion)
+Documentation=file://%h/.local/share/almanac/README.md
+After=network-online.target almanac-gateway.service
+Wants=almanac-gateway.service
+
+[Service]
+Type=simple
+Environment=ALMANAC_PYTHON=%h/.local/share/almanac/venv/bin/python
+# Optional, 0600, secret *references* only: e.g. OP_SERVICE_ACCOUNT_TOKEN for `op read`,
+# or the API key variables named by [autopilot] secrets = { NAME = "env:NAME" }.
+EnvironmentFile=-%h/.config/almanac/autopilot.env
+ExecStart=%h/.local/share/almanac/venv/bin/almanac autopilot run
+Restart=on-failure
+RestartSec=120
+RestartPreventExitStatus=3
+# SIGTERM: finish or abandon the current step (children are killed), exit.
+KillMode=mixed
+TimeoutStopSec=90
+# No privilege escalation from anything it starts (sudo cannot work).
+NoNewPrivileges=yes
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+# Coding sessions and test runs (e.g. .NET builds) live in this cgroup.
+MemoryHigh=3G
+MemoryMax=5G
+TasksMax=512
+
+[Install]
+WantedBy=default.target
