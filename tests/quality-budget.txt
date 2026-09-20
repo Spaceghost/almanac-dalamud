@@ -1,0 +1,4 @@
+bandit 8
+coverage-floor 77
+mypy 20
+ruff 125
