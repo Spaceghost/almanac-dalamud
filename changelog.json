@@ -1,7 +1,7 @@
 {
   "_comment": "The changelog. tools/changelog.py renders CHANGELOG.md from this file, and the plugin shows the same entries in game under What's new (the file is embedded in Almanac.Core). Every user-visible change edits this file in the same commit. Statuses: new/fix (in a release, seen working), beta (merged, not yet verified in its real setting), next (still being built).",
   "project": "Almanac",
-  "intro": "Every change to Almanac a user can see, newest first: the local agent and its engine, and the Almanac plugin in FFXIV.\n\nAlmanac has not had a release yet. Everything below is merged and unit-tested with fakes; what has and has not actually been run against a real model server, a real game or real hardware is listed in the README's \"Untested\" section, and each entry says so for itself.",
+  "intro": "Every change to Almanac a user can see, newest first: the local agent and its engine, and the Almanac plugin in FFXIV.\n\nAlmanac's releases are built and tested without the game. Everything below is merged and unit-tested with fakes; what has and has not actually been run against a real model server, a real game or real hardware is listed in the README's \"Untested\" section, and each entry says so for itself.",
   "releases": [
     {
       "version": "next",
