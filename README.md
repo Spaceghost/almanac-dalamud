@@ -731,7 +731,7 @@ implicitly. `--scope code` does not cover pushes.
 path = "~/src/my-plugin"          # your checkout; autopilot only adds worktrees and branches to it
 github = "you/my-plugin"
 remote = "origin"                 # "" = no remote: work stays on a local branch, no PR ("needs you")
-base = "main"
+base = "master"
 test = ["tests/run.sh"]           # required: without it tasks for this repo go to "needs you"
 setup = []                        # optional command before tests
 coder = "claude"                  # or "codex"
