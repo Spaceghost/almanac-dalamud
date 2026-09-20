@@ -13,9 +13,9 @@ Statuses mean exactly what they mean in the What's new view in game:
 * **BETA** — merged, but not yet verified in game.
 * **SOON** — still being built.
 
-## [Unreleased] — In the workshop
+## [0.2.0] — Released 2026-09-20
 
-Merged, but nothing here has been through a release. BETA means it is built and tested with fakes but has not been seen working in the place it is meant to run; SOON means it is still being built.
+BETA entries are in this release but have not been verified in game yet; they become NEW or FIX once they have been seen working.
 
 * Sharing a benchmark result from the game signs you in first: the leaderboard now takes results only from a signed-in player, so Share shows a short code, opens spacegho.st in your browser to approve Almanac with GitHub or XIVAuth, and sends the result once you have, without freezing the window while it waits. The token is kept with the plugin's settings and never shown; Sign out revokes it. If the server refuses the token it is forgotten and you are asked to sign in again, and whatever the server says is shown as it is. The plugin is 0.2.0, the first version that can share. Tested with a fake server only; not yet run in game or against the live site.
 * `almanac bench --submit` signs you in first: the leaderboard now takes results only from a signed-in player, so the first submit shows a short code, opens spacegho.st to approve Almanac with GitHub or XIVAuth, and carries on by itself. The token is kept in the state directory with mode 0600, is never printed, and `almanac bench --unlink` revokes and deletes it. A refused token is dropped and linked again once; the server's own message is shown when it says no. The CLI is 0.2.0, the first version that can submit. Tested with a fake server only; not yet run against the live site.
