@@ -143,7 +143,7 @@ public sealed class TransportTests
         Assert.Equal(7, result.OutputTokens);
         Assert.NotNull(result.TtftMs);
         Assert.Equal("http://m/v1/chat/completions", handler.Requests[0].Url);
-        Assert.Equal(true, JsonNode.Parse(handler.Requests[0].Body)!["stream"]!.GetValue<bool>());
+        Assert.True(JsonNode.Parse(handler.Requests[0].Body)!["stream"]!.GetValue<bool>());
     }
 
     [Fact]

@@ -1,0 +1,81 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+trim_trailing_whitespace = true
+
+[*.{csproj,props,targets,slnx,json}]
+indent_size = 2
+
+[*.cs]
+indent_size = 4
+
+# --------------------------------------------------------------------------------------------
+# The reload-leak rules. A Dalamud plugin is loaded into the game process and reloaded in place;
+# a disposable left undisposed or an event left subscribed keeps the whole assembly, and with it
+# every object it ever touched, alive for the rest of the session. These are errors, never
+# warnings, and they are not to be demoted without replacing them with something stricter.
+# --------------------------------------------------------------------------------------------
+
+# Disposable field never disposed. This is the build-time "every IDisposable field is disposed" check.
+dotnet_diagnostic.CA2213.severity = error
+# Type owns disposable fields but is not itself disposable.
+dotnet_diagnostic.CA1001.severity = error
+# Dispose() must call GC.SuppressFinalize.
+dotnet_diagnostic.CA1816.severity = error
+# Dispose pattern implemented correctly.
+dotnet_diagnostic.CA1063.severity = error
+# Disposable created and dropped on the floor.
+dotnet_diagnostic.CA2000.severity = error
+# Fire-and-forget async: the call is not awaited (CS4014) or the ValueTask is misused (CA2012).
+dotnet_diagnostic.CS4014.severity = error
+dotnet_diagnostic.CA2012.severity = error
+# Do not create tasks without passing a TaskScheduler.
+dotnet_diagnostic.CA2008.severity = error
+# Dispose objects before losing scope's siblings: call Dispose once, and do not dispose twice.
+dotnet_diagnostic.CA1065.severity = error
+# Static holds on to a disposable / thread-static misuse and the timer/stream families.
+dotnet_diagnostic.CA2002.severity = error
+
+# ConfigureAwait(false) on every await. Dalamud's framework thread is real, and an await that
+# resumes on it is how background work sneaks onto the render thread. Three sites needed fixing;
+# it did not flood, so it is an error rather than a warning.
+dotnet_diagnostic.CA2007.severity = error
+
+# --------------------------------------------------------------------------------------------
+# Demotions. Each one names the exact rule and why. Nothing here is a blanket "none".
+# --------------------------------------------------------------------------------------------
+
+# CA1826: "use the collection directly instead of Enumerable.First/Last". Both sites read better
+# as LINQ over a local list and neither is on a hot path; correctness is unaffected.
+dotnet_diagnostic.CA1826.severity = suggestion
+
+# CA1725: parameter names must match the base declaration. Demoted in tests only (see below);
+# in product code it stays a warning.
+
+# Code style (IDE####) is enforced in the build, but formatting-only differences must not fail
+# a build on a machine with a different editor. Whitespace rules are suggestions; the meaningful
+# style rules (unused usings, unnecessary code) stay warnings.
+dotnet_diagnostic.IDE0055.severity = suggestion
+# IDE0011 (braces on single-line if): this codebase deliberately writes single-statement ifs
+# without braces throughout; adding them is churn, not a fix.
+dotnet_diagnostic.IDE0011.severity = none
+# IDE0058 (expression value never used): fires on every ImGui.* call, which returns a bool that
+# only some call sites care about. Genuine fire-and-forget is caught by CS4014/CA2012 instead.
+dotnet_diagnostic.IDE0058.severity = none
+
+[tests/**/*.cs]
+# CA1725 in test fakes: the fakes shorten `cancellationToken` to `ct` to match this codebase's
+# own convention. Overriding a framework signature does not make the shorter name wrong here.
+dotnet_diagnostic.CA1725.severity = none
+# CA1707 / CA2007 in tests: xUnit test names carry underscores and tests have no UI thread.
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA2007.severity = none
+# CA2000 in tests: the fakes (FakeHandler, HttpClient, in-memory stores) are deliberately
+# short-lived inside a single test method and torn down with the process. Keeping the rule an
+# error here would mean wrapping every arrange block in `using`, which hides what each test does.
+# It stays an error in src/, which is where a leaked handle survives a plugin reload.
+dotnet_diagnostic.CA2000.severity = none

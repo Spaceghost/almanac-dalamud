@@ -38,7 +38,8 @@ public sealed class ChatClient(HttpClient http, string baseUrl, string? apiKey =
 
         var accumulator = new StreamAccumulator(sw, onDelta);
         var mediaType = response.Content.Headers.ContentType?.MediaType ?? "";
-        await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        await using var streamScope = stream.ConfigureAwait(false);
         if (mediaType.Contains("event-stream", StringComparison.OrdinalIgnoreCase))
         {
             await foreach (var data in Sse.ReadDataAsync(stream, ct).ConfigureAwait(false))
