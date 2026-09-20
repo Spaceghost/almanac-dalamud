@@ -67,3 +67,69 @@ context_tokens = 8192                # the model's context: thread history (ask 
 # categories = ["character", "inventory", "party", "progress", "world", "ui", "meta", "chat", "actions", "duty", "dalamud"]
 # status_tool = "post_status"
 # status_agent = "almanac"
+
+# autopilot: autonomous coding + game companion (README "Autopilot"). Nothing
+# runs until you start `almanac autopilot run` or enable almanac-autopilot.
+# Every key is optional; these are the defaults unless noted.
+# [autopilot]
+# dry_run = true                      # plans, worktrees and tests only: no coding sessions, pushes, PRs or tickets
+# coder = "claude"                    # cloud coder: claude (claude -p) | codex (codex exec)
+# max_attempts = 3                    # then the task goes to "needs you"
+# digest_hour = 7                     # morning digest after this local hour
+# secrets = { ANTHROPIC_API_KEY = "env:ANTHROPIC_API_KEY" }   # env:NAME or op://vault/item/field only
+# deny_paths = ["~/.config", "~/.ssh", "~/.gnupg"]              # a repo inside one of these is refused
+#
+# [autopilot.approval]                # what you must say yes to (README "Approval")
+# require = ["code", "push", "game_action"]
+# code_scope = "task"                 # one yes per task | "step": one per coding session
+# allow_session_minutes = 5           # `almanac autopilot allow`, sudo-like
+# max_allow_session_minutes = 60
+#
+# [autopilot.caps]
+# coding_runs_per_day = 2             # cloud sessions per day; then local coders take over
+# tokens_per_day = 200000
+# cost_usd_per_day = 2.0
+# max_turns = 20                      # per cloud session
+# max_wall_minutes = 20               # per cloud session
+# local_runs_per_day = 40
+# local_max_wall_minutes = 30
+# max_parallel = 3                    # steps in flight at once (one per task)
+# cloud_slots = 1
+# review_rounds = 1
+# max_files_per_task = 40             # a branch touching more files goes to you, not to a PR
+# min_free_memory_mb = 0              # >0: coding and test steps wait while free memory is below it
+#
+# [autopilot.local_coder]
+# tool = "codex"                      # codex (Codex CLI with a local provider) | aider | custom argv
+# codex_home = ""                     # default <state>/autopilot/codex; never the owner's ~/.codex
+# extra_args = []                     # appended to the preset
+#
+# [autopilot.repos.my-plugin]
+# path = "~/src/my-plugin"
+# github = "you/my-plugin"            # issues, CI status and draft PRs (gh CLI)
+# base = "main"
+# test = ["tests/run.sh"]             # the repo's own test entry point, run in the worktree
+#
+# [autopilot.pool.gpu-box]            # model backends; none = the [gateway] backend only
+# url = "http://100.64.0.20:41881"
+# kind = "almanac"                    # almanac (gateway) | ollama | openai
+# model = "qwen3.5:9b"
+# coder_model = "qwen3.5:9b"          # optional: a different model for coding sessions
+# context = 32768                     # context this backend serves; the local coder compacts below it
+# roles = ["planner", "coder", "reviewer"]   # give a coding-only box just ["coder", "reviewer"]
+# token_file = "~/.config/almanac/gpu-box.token"
+# priority = 10
+# unavailable_while_process = []      # e.g. a game that needs this GPU
+#
+# [autopilot.sources.github]
+# enabled = true
+# label = "autopilot"
+# [autopilot.sources.inbox]
+# enabled = true
+# path = "~/notes/autopilot-inbox.md"
+# [autopilot.sources.vote]
+# enabled = false
+# url = "https://example.org/vote"    # reads <url>/api/tallies and <url>/ideas.json
+# repo = "my-plugin"
+# [autopilot.sources.ci]
+# enabled = true

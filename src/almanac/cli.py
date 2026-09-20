@@ -450,6 +450,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run", type=int, help="use stored run N instead of running (print it, or --submit it)")
     p.add_argument("--list", action="store_true", help="list stored runs")
 
+    from .autopilot.cli import register as register_autopilot
+
+    register_autopilot(sub)
+
     ns = parser.parse_args(argv)
     level = logging.INFO if ns.command in ("mcp", "gateway") else logging.WARNING
     logging.basicConfig(level=level, format="%(asctime)s %(name)s %(levelname)s %(message)s", stream=sys.stderr)

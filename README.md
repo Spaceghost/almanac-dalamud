@@ -477,12 +477,307 @@ per-VRAM-tier recommendations.
   Ghostty for Dalamud's `/ask` panel runs `almanac ask --stream-json` in a
   thread and shows the answer as chat bubbles, with follow-ups.
 
+## Autopilot
+
+`almanac autopilot` is an autonomous loop that works through a queue of
+coding tasks day and night and keeps you posted in game. Local models (free,
+on your GPUs) do the planning, triage, reviews, summaries and, when the cloud
+budget is spent, the coding too. Cloud coding sessions (Claude Code or Codex,
+headless) do real code changes within hard per-run and per-day caps. It never
+pushes to your main branch: every change arrives as a **draft pull request**
+with test evidence, and CI must pass before a task counts as done.
+
+**Nothing leaves the sandbox without your yes.** A task's first coding session
+and every push are approval-gated, game actions are gated by XivMcp, and each
+request waits in the queue database until you answer - minutes or days later,
+across restarts and reboots. `almanac autopilot allow` opens a sudo-like
+5-minute window when you want to clear a pile in one go.
+
+It is off until you start it, and `dry_run = true` is the default.
+
+```
+ sources (every 15 min)                       queue.sqlite (tasks, plan steps, log, spend)
+ ---------------------------------            ------------------------------------------------
+ GitHub issues labelled "autopilot" --+
+ inbox file "- [ ] ..." items -------+-->  task: queued -> ready -> (waiting on ticket) -> review -> done
+ vote site top ideas (read-only) ----+       |                                                  \-> needs you
+ failing CI on the base branch ------+       v
+ almanac autopilot add / MCP --------+    dispatcher: highest value first, up to max_parallel steps at once
+                                             |
+      +--------------------------------------+-------------------------------------------+
+      | plan / local / summaries      code                         review          test / pr / ci / game
+      v                               v                            v               v
+  model pool: planner role     cloud: claude -p | codex exec   pool: reviewer   repo's own test entry point,
+  (failover between backends)  (caps, turns, wall time)        role, not the    git push autopilot/<task>,
+                               |  cap / rate limit / quota /   author's GPU     gh pr create --draft,
+                               |  auth error detected          PR comment,      gh pr checks,
+                               v                               fix round        XivMcp request_action -> ticket
+                              local coder (Codex or aider on
+                              a local model) on a coder backend
+                              lease; tasks split smaller
+      all coding and tests run in <state>/autopilot/worktrees/<repo>-<task> (bubblewrap when installed)
+                                             |
+                                             v
+          XivMcp (in game): agent board, "needs you" tracker objectives, morning digest toast
+```
+
+### How a task runs
+
+1. **Plan.** A local model turns the task into steps (`local`, `code`,
+   `game_read`, `game_action`). Rules no model can override: code only for an
+   allow-listed repo; every code step is followed by the repo's tests; a plan
+   that changes code ends with *draft PR*, *cross-review*, *CI*. If no model
+   answers, a fixed plan is used.
+2. **Code.** On the cloud while today's caps allow (`coding_runs_per_day`,
+   `tokens_per_day`, `cost_usd_per_day`; per run `max_turns` and
+   `max_wall_minutes`). When a session fails with a usage limit, rate limit,
+   quota/billing or authentication error (detected from the CLI's output),
+   cloud coding is switched off (30 minutes for a rate limit, until the next
+   day otherwise) and the same step continues on a **local coder** (Codex CLI
+   pointed at the local model, or aider) in the same worktree. Local coders
+   get smaller jobs: a code step is split into up to `local_split_parts`
+   parts, each followed by the tests. Cloud is used again once the block
+   expires or the day rolls over.
+3. **Test.** The repo's own entry point (`test = [...]`), in the worktree. A
+   failure keeps the output as evidence and inserts a fix step and a re-test.
+4. **Draft PR.** Push `autopilot/<id>-<slug>` (never the base or a protected
+   branch, never `--force`), `gh pr create --draft` with a summary, the test
+   output, remaining risks, and labels naming who wrote it (`autopilot`,
+   `by:claude`, `by:local-qwen3.5-9b-<backend>`).
+5. **Cross-review.** A local model on a different backend than the author
+   reviews the diff and comments on the PR. If it asks for changes (bugs,
+   missing tests), a fix round follows (`review_rounds`).
+6. **CI.** `gh pr checks` until it passes (done), fails (fix round) or reports
+   nothing (needs you).
+
+Failures back off exponentially (`backoff_base_seconds` doubling up to
+`backoff_max_seconds`); after `max_attempts` the task stops and shows up
+under "needs you". Waiting for a free backend, a closed game or running CI is
+not a failure.
+
+### Model pool
+
+`[autopilot.pool.<name>]` lists model backends: almanac gateways on other
+machines (`kind = "almanac"`, with that gateway's token file), Ollama
+servers, or any OpenAI-compatible server. Each has `roles` (`planner`,
+`coder`, `reviewer`), `slots`, `priority`, and optional rules:
+`unavailable_while_process = ["game.exe"]` keeps a GPU free while that
+process runs on this machine (a job already on it is stopped within seconds
+and an Ollama backend is asked to unload), `check_command` for rules about
+another machine, `enabled = false`. Backends are health-checked (`/healthz`,
+`/api/version` or `/v1/models`) and short calls fail over to the next one.
+Long jobs take a lease, so a coder on one GPU and a reviewer on another run
+at the same time as a cloud session. `almanac autopilot pool` shows health
+and load. With no pool configured, the `[gateway]` backend is used.
+
+`coder_model` gives a backend a different model for coding sessions, and
+`context` (default 32768) says what context it actually serves — the local
+coder is told, so it compacts instead of silently overflowing.
+
+### Local coding sessions
+
+`[autopilot.local_coder] tool` is `codex` (the default), `aider`, or a
+`custom` argv with `{prompt} {model} {base_url} {worktree} {test} {context}
+{compact}` placeholders. The session runs in the task's worktree, against the
+leased backend's OpenAI-compatible endpoint, and commits nothing autopilot
+cannot see: whatever it leaves uncommitted is committed after the session, and
+the repo's tests decide whether the step passed.
+
+The `codex` preset is Codex CLI pointed at the local endpoint, and every option
+in it exists because of an observed failure against Ollama:
+
+- `web_search="disabled"` — Ollama serves no web search, so the built-in
+  `web_search` tool ends the session: the model calls it, Ollama answers
+  `ollama cloud is disabled: web search is unavailable` and the stream drops.
+- `model_context_window` / `model_auto_compact_token_limit` — codex has no
+  catalogue entry for a local model (it says so and uses fallback metadata),
+  assumes a large context and never compacts.
+- `--disable` for goals, sub-agents, images, apps, skills, hooks and plugins —
+  a small model picks the wrong tool more often the longer the tool list is,
+  and each definition costs context. What is left is
+  `exec_command`/`write_stdin`: the model edits files by writing them from the
+  shell. It will sometimes try `apply_patch`, which codex does not register for
+  a model without catalogue metadata; the call fails and the model writes the
+  file instead.
+- `CODEX_HOME` is autopilot's own directory (`<state>/autopilot/codex`, or
+  `codex_home`), never the owner's `~/.codex`, whose model, hooks, plugins and
+  MCP servers are for interactive use.
+
+`aider` is a fallback: `aider-chat` requires Python < 3.13, so it needs its own
+interpreter (a container or a managed Python) on a host that ships a newer one.
+
+### FFXIV
+
+Through [XivMcp](#ffxiv-and-dalamud), configured as `[upstreams.<name>]` and
+named in `[autopilot.game] upstream`:
+
+- **Observe and UI, freely:** read-tier tools in `game_read` steps, progress
+  on the agent board (`post_status`), a toast with the morning digest, and
+  pending approvals plus "needs you" items as quest-tracker objectives when
+  the server lists an objective tool (feature-detected from `tools/list`).
+- **Actions only through approvals:** a `game_action` step calls XivMcp's
+  `request_action` and gets a ticket. The step is parked (the task waits,
+  other tasks keep running), the ticket is polled with `get_ticket`, and the
+  plan resumes right after that step once you approve it in game, now or
+  later. Denied, expired or cancelled tickets re-plan the task without that
+  action. Autopilot never calls action or chat tools directly and never
+  answers an approval itself.
+- **No gameplay automation, ever.** Automating movement, combat, gathering,
+  crafting, trading, the market board or chat breaks FINAL FANTASY XIV's
+  terms of service. Tools that look like these are refused even if a plan
+  asks for them, and dry-run never files tickets.
+
+### Controls
+
+```sh
+almanac autopilot run [--once] [--dry-run|--live]   # foreground loop
+almanac autopilot status [--json]                   # state, spend vs caps, what waits on you
+almanac autopilot list [--all]
+almanac autopilot log <task>                        # plan, step states, event log
+almanac autopilot add "fix the resize flicker" --repo my-plugin [--priority 80]
+almanac autopilot pause | resume                    # stop/start taking new steps
+almanac autopilot stop                              # exit after the current step
+almanac autopilot stop --now                        # kill switch: running sessions die within a second
+almanac autopilot retry <task> | cancel <task>
+almanac autopilot pool                              # model backends
+almanac autopilot digest                            # write the digest now
+
+almanac autopilot pending                           # what waits for your yes, oldest first
+almanac autopilot show ap-3                         # exactly what that one would do
+almanac autopilot approve ap-3 [--minutes 5]        # yes (and optionally open a window)
+almanac autopilot deny ap-3 [--reason "not now"]
+almanac autopilot approve all | deny all
+almanac autopilot allow [--minutes 5] [--scope all|code|push|game]
+```
+
+The kill switch is a file (default `~/.local/state/almanac/autopilot/STOP`,
+`[autopilot] kill_switch`). While it exists nothing runs and the service is
+not restarted; delete it to allow runs again. Over MCP, `autopilot_status` and
+`autopilot_pending` are read tools; `autopilot_add`, `autopilot_pause` and
+`autopilot_approve` are change tools and need confirmation like every other
+change.
+
+### Approval
+
+```toml
+[autopilot.approval]
+require = ["code", "push", "game_action"]   # remove a kind to stop asking for it
+code_scope = "task"                          # one yes per task | "step": every session
+allow_session_minutes = 5                    # `almanac autopilot allow` default
+max_allow_session_minutes = 60               # a longer --minutes is clamped to this
+```
+
+| Gate | When it asks | What approving means |
+| --- | --- | --- |
+| `code` | before a task's first coding session | that task may edit its own worktree, all night if it wants |
+| `push` | before every `git push` and draft PR | this branch goes to GitHub as a draft; nothing is merged |
+| `game_action` | before any XivMcp action tool | XivMcp's own ticket, approved in game |
+
+A request is a row in `queue.sqlite`: it survives `stop`, a crash and a reboot,
+and the step that asked parks on it (the loop keeps working on other tasks).
+When the answer arrives the step **runs from where it stopped** - approval
+unblocks a step, it never stands in for it. A denial is final: the task goes to
+"needs you" with your reason and is never retried on its own. Pending items are
+also pushed to the in-game quest tracker, so you can see them without leaving
+the game, and `autopilot_pending` / `autopilot_approve` answer them from a chat
+with almanac.
+
+An allow session is deliberately dumb: a timestamp in the database, matching
+requests approved as they arrive while it lasts, nothing extended or renewed
+implicitly. `--scope code` does not cover pushes.
+
+### Safety model
+
+- **Where code runs:** only in per-task git worktrees under
+  `<state>/autopilot/worktrees`, never in your checkout. With bubblewrap
+  installed (`[autopilot.sandbox] mode = "auto"`), coding sessions and tests
+  see a read-only filesystem except the worktree, the repo's git directory and
+  the coding CLI's own state; `~/.ssh`, almanac's token, `gh` and `op` config
+  are hidden; `no_new_privs` means `sudo` cannot work. Without bubblewrap the
+  same environment rules apply and the coding CLI's own permission rules
+  (Claude Code `--disallowedTools` for sudo, ssh, `git push`, `gh`, `op`;
+  Codex `--sandbox workspace-write`) are the fence.
+- **ssh:** hidden from sessions unless a repo sets `allow_ssh_hosts`.
+- **Secrets:** `[autopilot] secrets` maps variable names to `env:NAME` or
+  `op://vault/item/field` (1Password CLI, read when a session starts); literal
+  values are refused. Sessions get only `pass_env` plus those secrets.
+  Resolved values are masked in every log line, PR body and digest.
+- **GitHub:** sources use an allow-list of read-only `gh` subcommands. Writes
+  are limited to pushing the task branch, opening a draft PR, labelling it and
+  commenting reviews on it, and none of that happens in dry-run.
+- **Approval:** see above. Falling back to a local coder is not a way around a
+  gate: the gate is checked before either coder starts.
+- **Repositories:** only the paths listed under `[autopilot.repos.*]`, and a
+  repo whose path is inside `[autopilot] deny_paths` (`~/.config`, `~/.ssh`,
+  `~/.gnupg`, `~/.claude`, `~/.codex`, almanac's own state and knowledge repo,
+  `~/.xlcore` by default) is dropped at load time and named in `status`.
+- **Hard caps:** `max_parallel` steps in flight, `cloud_slots` cloud sessions,
+  `max_turns` / `max_wall_minutes` per session, the daily run/token/cost caps,
+  `max_files_per_task` (a bigger branch goes to you instead of a PR) and
+  `min_free_memory_mb` (coding and test steps wait rather than compete for
+  memory with whatever else the machine is doing).
+- **Never:** force-push, push to a protected or base branch, push a branch that
+  is not `autopilot/<task>`, merge, deploy, or push at all before a `push`
+  approval and a passing test step.
+- **Audit:** coding sessions, limits hit, PRs, tickets, approvals asked and
+  answered, and failures go to `audit.jsonl` (`almanac audit`) as well as the
+  task log and `<state>/autopilot/autopilot.log`, a plain-text append-only
+  line per action with timestamps.
+
+### Adding repositories and sources
+
+```toml
+[autopilot.repos.my-plugin]
+path = "~/src/my-plugin"          # your checkout; autopilot only adds worktrees and branches to it
+github = "you/my-plugin"
+remote = "origin"                 # "" = no remote: work stays on a local branch, no PR ("needs you")
+base = "main"
+test = ["tests/run.sh"]           # required: without it tasks for this repo go to "needs you"
+setup = []                        # optional command before tests
+coder = "claude"                  # or "codex"
+allow_ssh_hosts = []              # hosts a session may ssh to
+priority = 0                      # added to every task's value
+```
+
+Sources: `[autopilot.sources.github]` (label, default `autopilot`),
+`[autopilot.sources.inbox]` (a Markdown file: `- [ ] text @repo !high`),
+`[autopilot.sources.vote]` (a vote site's public `api/tallies` and
+`ideas.json`; top N by 2 x want + maybe - skip), `[autopilot.sources.ci]`
+(latest failed run on each repo's base branch). Tasks from all sources are
+de-duplicated, so polling is safe.
+
+### Costs and caps
+
+Local work (planning, reviews, triage, tests, local coding) costs nothing but
+electricity. Cloud spend is bounded per day by `coding_runs_per_day`,
+`tokens_per_day` (input + output + cache writes, as reported by the CLI) and
+`cost_usd_per_day` (Claude Code reports cost; Codex usage is priced with
+`[autopilot.codex] usd_per_mtok`, 0 if unset), and per run by `max_turns`
+and `max_wall_minutes`. Caps are checked before a session starts, so one run
+can overshoot the token or cost cap by at most its own size; keep
+`max_turns` small. `almanac autopilot status` and the morning digest show
+today's spend.
+
+### Enabling it
+
+```sh
+deploy/install.sh --no-start                     # installs almanac-autopilot.service, does not enable it
+$EDITOR ~/.config/almanac/config.toml             # [autopilot] with repos, caps, pool; keep dry_run = true
+almanac autopilot add "try the pipeline" --repo my-plugin
+almanac autopilot run --once --dry-run           # repeat and read `almanac autopilot log 1`
+systemctl --user enable --now almanac-autopilot  # when the dry runs look right; then set dry_run = false
+```
+
+For running it in an Incus container, see `deploy/incus/README.md`.
+
 ## Layout
 
 ```
 src/almanac/      config, kb (index), tools (TOML runner), service (confirm+audit),
                   mcp_server, gateway, codex_compat, guard, residency, agent, chat, threads,
                   upstream, cli
+src/almanac/autopilot/  store (queue), sources, planner, pool, budget, coder, sandbox,
+                  git, game, runner, digest, app/cli/mcp_tools
 examples/         knowledge/ and tools/ to copy from
 deploy/           install.sh, systemd user units, Quadlet, Incus profile
 docs/TOOLS.md     tool file reference
@@ -549,3 +844,12 @@ observed working; say what is unverified in the entry itself, the way
   fakes; nothing has been run against a real model server or in game yet.
 - `almanac bench` against a real model server and live XivMcp.
 - The leaderboard API itself (`/mods/ffxiv/almanac/api/results`).
+- Autopilot has only run against fakes and in dry-run against a scratch git
+  repository: no real `claude -p`, `codex exec`, aider, `gh pr create`, push,
+  XivMcp approval ticket or remote model backend has been exercised. The
+  ticket tools (`request_action`, `get_ticket`) follow the interface XivMcp
+  is adding on its deferred-approvals branch; argument names are read from the
+  tool's schema, but the result shape is assumed (`ticket_id`/`id`,
+  `state`/`status`, `result`). No quest-tracker objective tool exists in
+  XivMcp yet, so that path is feature-detected and untested. The bubblewrap
+  profile has not been run with the real coding CLIs.
