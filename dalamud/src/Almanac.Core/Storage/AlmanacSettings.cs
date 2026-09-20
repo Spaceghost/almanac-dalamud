@@ -62,6 +62,12 @@ public sealed class AlmanacSettings
 
     public string LeaderboardUrl { get; set; } = Results.DefaultLeaderboard;
 
+    /// <summary>Where the device link for leaderboard submissions is made.</summary>
+    public string SignInUrl { get; set; } = DeviceLink.DefaultApi;
+
+    /// <summary>The player's leaderboard token from the device link. A secret: never logged, shown or put in a URL.</summary>
+    public string LeaderboardToken { get; set; } = "";
+
     public string EffectiveBaseUrl => Engine == EngineAlmanac ? AlmanacUrl : BaseUrl;
 
     public string EffectiveApiKey => Engine == EngineAlmanac ? AlmanacToken : ApiKey;

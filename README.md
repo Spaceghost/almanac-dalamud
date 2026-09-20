@@ -448,7 +448,8 @@ XIVLauncher.Core/Wine). It needs no Python and no almanac engine.
 - **Benchmark** (`/almanac bench`): the [suite](#community-benchmark) against
   your model, with mock game data or live through XivMcp; results stay in
   SQLite and are shared only when you press **Share** and confirm the exact
-  JSON.
+  JSON. Sharing needs a one-time sign-in: the window shows a code and opens
+  spacegho.st in your browser to approve it.
 - **Almanac engine** (power users): point the plugin at an almanac gateway
   (`http://127.0.0.1:41881/v1` and its token) to get the engine's model
   residency and memory guard while keeping the in-game chat.

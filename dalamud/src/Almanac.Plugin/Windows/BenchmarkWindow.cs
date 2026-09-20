@@ -8,6 +8,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Colors;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
+using Dalamud.Utility;
 
 namespace Almanac.Plugin.Windows;
 
@@ -31,6 +32,8 @@ public sealed class BenchmarkWindow : Window, IDisposable
     private (long Id, JsonObject Json)? lastResult;
     private (long Id, string Text)? submitPreview;
     private string? submitMessage;
+    private DeviceLink? link;
+    private CancellationTokenSource? linkCts;
     private IReadOnlyList<BenchRow> history = [];
     private bool historyDirty = true;
 
@@ -239,29 +242,137 @@ public sealed class BenchmarkWindow : Window, IDisposable
         ImGui.TextWrapped($"This exact JSON will be sent to {plugin.Settings.LeaderboardUrl.TrimEnd('/')}/api/results. It has no names, paths or addresses: GPU model and VRAM, rounded RAM, OS family, backend, model and scores.");
         var text = preview.Text;
         ImGui.InputTextMultiline("##preview", ref text, text.Length + 1, new Vector2(-1, 160 * ImGuiHelpers.GlobalScale), ImGuiInputTextFlags.ReadOnly);
-        if (ImGui.Button("Send it"))
+        if (link != null)
+        {
+            DrawLink();
+            return;
+        }
+
+        var signedIn = plugin.Settings.LeaderboardToken.Length > 0;
+        if (!signedIn)
+            ImGui.TextWrapped("The leaderboard takes results from signed-in players. Send opens spacegho.st in your browser, where you sign in with GitHub or XIVAuth and approve Almanac; the result is sent once you have.");
+        if (ImGui.Button(signedIn ? "Send it" : "Sign in and send"))
         {
             var row = store.BenchRuns().FirstOrDefault(r => r.Id == preview.Id);
             if (row != null)
-            {
-                submitMessage = "Sending…";
-                var url = plugin.Settings.LeaderboardUrl;
-                _ = Task.Run(async () =>
-                {
-                    var (ok, message) = await Results.SubmitAsync(engine.Quick, url, JsonNode.Parse(row.ResultJson)!.AsObject(), CancellationToken.None).ConfigureAwait(false);
-                    if (ok)
-                        store.MarkSubmitted(row.Id);
-                    submitMessage = message;
-                    historyDirty = true;
-                });
-            }
-
-            submitPreview = null;
+                Send(row);
+            if (link == null)
+                submitPreview = null;
         }
 
         ImGui.SameLine();
         if (ImGui.Button("Cancel"))
             submitPreview = null;
+        if (signedIn)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Sign out"))
+                SignOut();
+        }
+    }
+
+    /// <summary>The wait for the player to approve in the browser. The poll runs on the thread pool; this only reads its state.</summary>
+    private void DrawLink()
+    {
+        if (link?.Prompt is { } prompt)
+        {
+            ImGui.TextUnformatted("Your code:");
+            ImGui.SameLine();
+            ImGui.TextColored(ImGuiColors.DalamudViolet, prompt.UserCode);
+            ImGui.TextWrapped($"Approve Almanac at {prompt.VerificationUri} — it should have opened in your browser.");
+            if (ImGui.Button("Open the page again"))
+                Util.OpenLink(prompt.OpenUri);
+            ImGui.SameLine();
+        }
+
+        if (ImGui.Button("Cancel##link"))
+            linkCts?.Cancel();
+        ImGui.TextDisabled(link?.Message ?? "");
+    }
+
+    private void Send(BenchRow row)
+    {
+        var settings = plugin.Settings;
+        var url = settings.LeaderboardUrl;
+        var result = JsonNode.Parse(row.ResultJson)!.AsObject();
+        var token = settings.LeaderboardToken;
+        DeviceLink? linking = null;
+        CancellationTokenSource? linkingCts = null;
+        if (token.Length == 0)
+        {
+            linkCts?.Dispose();
+            linkCts = linkingCts = new CancellationTokenSource();
+            link = linking = new DeviceLink(engine.Quick, settings.SignInUrl);
+            submitMessage = null;
+        }
+        else
+        {
+            submitMessage = "Sending…";
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (linking != null)
+                {
+                    var linked = await linking.RunAsync(prompt => Util.OpenLink(prompt.OpenUri), linkingCts!.Token).ConfigureAwait(false);
+                    if (linked.AccessToken is not { } fresh)
+                    {
+                        submitMessage = linked.Message;
+                        return;
+                    }
+
+                    token = settings.LeaderboardToken = fresh;
+                    settings.Save(store);
+                    submitMessage = "Signed in. Sending…";
+                }
+
+                var sent = await Results.SubmitAsync(engine.Quick, url, result, token, CancellationToken.None).ConfigureAwait(false);
+                if (sent.Ok)
+                    store.MarkSubmitted(row.Id);
+                if (sent.Outcome == SubmitOutcome.SignInRequired)
+                {
+                    // The token is no good: forget it, so the next Send links again. Never retried here by itself.
+                    settings.LeaderboardToken = "";
+                    settings.Save(store);
+                    submitMessage = $"{sent.Message} Press Share to sign in again.";
+                }
+                else
+                {
+                    submitMessage = sent.Message;
+                }
+
+                historyDirty = true;
+            }
+            catch (OperationCanceledException)
+            {
+                submitMessage = "Sign-in cancelled. Nothing was sent.";
+            }
+            catch (Exception ex)
+            {
+                submitMessage = ex.Message;
+            }
+            finally
+            {
+                if (linking != null && ReferenceEquals(link, linking))
+                {
+                    link = null;
+                    submitPreview = null;
+                }
+            }
+        });
+    }
+
+    private void SignOut()
+    {
+        var settings = plugin.Settings;
+        var token = settings.LeaderboardToken;
+        settings.LeaderboardToken = "";
+        settings.Save(store);
+        submitMessage = "Signed out.";
+        var revoke = new DeviceLink(engine.Quick, settings.SignInUrl);
+        _ = Task.Run(() => revoke.RevokeAsync(token, CancellationToken.None));
     }
 
     private void DrawHistory()
@@ -292,5 +403,7 @@ public sealed class BenchmarkWindow : Window, IDisposable
     {
         cts?.Cancel();
         cts?.Dispose();
+        linkCts?.Cancel();
+        linkCts?.Dispose();
     }
 }

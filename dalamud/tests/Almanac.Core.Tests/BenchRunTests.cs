@@ -114,8 +114,8 @@ public sealed class BenchRunTests
     public async Task SubmitPostsToTheLeaderboardApi()
     {
         var handler = new FakeHandler((_, _) => FakeHandler.Json("""{"ok":true}"""));
-        var (ok, _) = await Results.SubmitAsync(new HttpClient(handler), Results.DefaultLeaderboard, new JsonObject { ["schema_version"] = 1 }, TestContext.Current.CancellationToken);
-        Assert.True(ok);
+        var sent = await Results.SubmitAsync(new HttpClient(handler), Results.DefaultLeaderboard, new JsonObject { ["schema_version"] = 1 }, null, TestContext.Current.CancellationToken);
+        Assert.True(sent.Ok);
         Assert.Equal("https://spacegho.st/mods/ffxiv/almanac/api/results", handler.Requests.Single().Url);
     }
 
