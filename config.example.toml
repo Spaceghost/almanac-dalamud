@@ -107,7 +107,7 @@ context_tokens = 8192                # the model's context: thread history (ask 
 # [autopilot.repos.my-plugin]
 # path = "~/src/my-plugin"
 # github = "you/my-plugin"            # issues, CI status and draft PRs (gh CLI)
-# base = "main"
+# base = "master"
 # test = ["tests/run.sh"]             # the repo's own test entry point, run in the worktree
 #
 # [autopilot.pool.gpu-box]            # model backends; none = the [gateway] backend only

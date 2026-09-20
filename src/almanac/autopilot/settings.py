@@ -110,7 +110,7 @@ REPO_DEFAULTS: dict[str, Any] = {
     "path": "",
     "github": "",  # owner/name, used for gh --repo
     "remote": "origin",  # "" for a repo without a remote: branches stay local, no PR
-    "base": "main",
+    "base": "master",
     "test": [],  # argv run inside the worktree, e.g. ["tests/run.sh"]
     "setup": [],  # optional argv before tests (e.g. dependency restore)
     "coder": "",  # default: [autopilot] coder

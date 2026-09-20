@@ -10,6 +10,14 @@
       "items": [
         {
           "status": "beta",
+          "text": "Autopilot: a task queue and loop that picks work up from GitHub issues, the inbox, vote tallies and failing CI, plans it with a pool of local models (roles, health checks and failover), and runs coding sessions in sandboxed git worktrees with a hybrid cloud/local coder that falls back to a local model when the cloud hits its limit. Budget caps, a kill switch, a durable log and a morning digest come with it. Nothing here has run against a real coding CLI, a real model backend or a real pull request yet."
+        },
+        {
+          "status": "beta",
+          "text": "Nothing autopilot writes leaves its sandbox without you: each change waits on an approval request you see in game, deny paths and caps are enforced before a session starts, and `almanac autopilot pending` lists what is parked. Not yet exercised against XivMcp's real approval tickets."
+        },
+        {
+          "status": "beta",
           "text": "Install Almanac in the game without a .NET SDK: it is published as a normal Dalamud plugin from the author's repository at spacegho.st/mods/ffxiv/plugins.json. A `v*` tag builds, tests, packages and publishes it on GitHub's own runners, and a pre-release tag goes to the testing channel instead. Building it yourself still works. No release has been cut yet."
         },
         {

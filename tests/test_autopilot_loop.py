@@ -246,7 +246,7 @@ def test_repo_without_remote_keeps_the_branch_local(tmp_path: Path) -> None:
     assert task.state == "needs_owner" and "ready locally" in task.note
     assert not [a for a in proc.argvs("git") if "fetch" in a or "push" in a] and not proc.argvs("gh")
     (add,) = [a for a in proc.argvs("git") if "worktree" in a and "add" in a]
-    assert add[-1] == "main"
+    assert add[-1] == "master"
 
 
 def test_unlisted_repo_goes_to_owner(tmp_path: Path) -> None:
