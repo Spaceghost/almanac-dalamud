@@ -22,6 +22,7 @@
 #   REPO               owner/name on GitHub (default $GITHUB_REPOSITORY, else
 #                      Spaceghost/almanac-dalamud)
 #   TESTING            1 to write pluginmaster-testing.json instead of pluginmaster.json
+#   RELEASE_TAG        the tag being released; the listing then carries the changelog
 #   SOURCE_DATE_EPOCH  timestamp for the zip entries and LastUpdate (default: the last
 #                      commit's time, else 0), so the same build packs to the same bytes
 #
@@ -93,8 +94,14 @@ done
 CHANNEL=stable
 LISTING="$OUT/pluginmaster.json"
 if [[ "${TESTING:-0}" == 1 ]]; then CHANNEL=testing; LISTING="$OUT/pluginmaster-testing.json"; fi
+# With RELEASE_TAG (the release workflow sets it), the listing also carries what changed,
+# from the changelog, for the installer to show.
+NOTES=()
+if [[ -n "${RELEASE_TAG:-}" ]]; then
+  NOTES=(--changelog "$(python3 "$ROOT/tools/releasekit.py" installer-notes "$RELEASE_TAG")")
+fi
 python3 "$ROOT/dalamud/tools/pluginmaster.py" \
   --manifest "$MANIFEST" --repo "$REPO" --channel "$CHANNEL" \
-  --last-update "$SOURCE_DATE_EPOCH" --out "$LISTING"
+  --last-update "$SOURCE_DATE_EPOCH" "${NOTES[@]}" --out "$LISTING"
 echo "== $LISTING"
 cat "$LISTING"

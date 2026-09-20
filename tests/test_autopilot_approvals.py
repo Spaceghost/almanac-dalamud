@@ -13,7 +13,7 @@ from almanac.autopilot.git import files_changed
 from almanac.autopilot.runner import Autopilot, InlineExecutor
 from almanac.autopilot.settings import DEFAULTS, Repo, Settings, _merge
 from almanac.autopilot.store import Store
-from autopilot_fakes import CLAUDE_OK, Clock, FakeGame, FakeModel, FakeProc, make_pilot, make_pool, run_until
+from autopilot_fakes import FakeModel, make_pilot, make_pool, run_until
 
 PLAN = json.dumps({"steps": [
     {"kind": "code", "title": "Make the change", "args": {"prompt": "add a flag"}},

@@ -10,7 +10,7 @@ from typing import Any
 from ..config import Config
 from ..service import Almanac
 from ..upstream import Upstream
-from .approvals import APPROVED, DENIED, Approval, Approvals, is_local
+from .approvals import Approval, Approvals, is_local
 from .game import Game, NoGame, XivMcpGame
 from .planner import Planner
 from .pool import BackendModel, Pool, PoolModel

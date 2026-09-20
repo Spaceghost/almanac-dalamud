@@ -289,6 +289,17 @@ See [the detailed guide](GUIDE.md), [declared tool format](docs/TOOLS.md),
 Keep documentation tied to the source/build it describes; separate host-test
 evidence from observations made inside the game.
 
+## Releasing
+
+```sh
+tools/release.sh test            # the next testing build, from master as it is
+tools/release.sh stable X.Y.Z    # the stable release X.Y.Z
+```
+
+One command: it checks the tree and CI, writes the version everywhere it lives, dates
+the changelog, tags, pushes, waits for the Release workflow, and verifies the published
+files and the live listing. `-n` is a dry run. See [docs/RELEASING.md](docs/RELEASING.md).
+
 ## License and support
 
 Maintained by [Spaceghost](https://github.com/Spaceghost), under the
