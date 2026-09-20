@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="32" viewBox="0 0 640 32">
+  <title>divider</title>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#d6a854" stop-opacity="0"/>
+      <stop offset="0.25" stop-color="#d6a854"/>
+      <stop offset="0.75" stop-color="#d6a854"/>
+      <stop offset="1" stop-color="#d6a854" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <path d="M10 16 H270 M370 16 H630" stroke="url(#g)" stroke-width="2.5"/>
+  <path d="M320 2 l14 14 l-14 14 l-14 -14 Z" fill="#d6a854"/>
+  <path d="M284 16 l8 -8 l8 8 l-8 8 Z M340 16 l8 -8 l8 8 l-8 8 Z" fill="#4fb0f0"/>
+</svg>
