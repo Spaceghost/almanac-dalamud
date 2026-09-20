@@ -10,6 +10,10 @@
       "items": [
         {
           "status": "beta",
+          "text": "The native SQLite in the plugin download is 3.53.3, past the 3.50.2 that fixes CVE-2025-6965: Microsoft.Data.Sqlite 10.0.12 brings SQLitePCLRaw 2.1.12 in place of the flagged 2.1.11, and a test now fails if the SQLite that actually loads is ever older than the fixed release. The storage file and its schema are unchanged. Not yet seen loading inside Dalamud."
+        },
+        {
+          "status": "beta",
           "text": "Autopilot: a task queue and loop that picks work up from GitHub issues, the inbox, vote tallies and failing CI, plans it with a pool of local models (roles, health checks and failover), and runs coding sessions in sandboxed git worktrees with a hybrid cloud/local coder that falls back to a local model when the cloud hits its limit. Budget caps, a kill switch, a durable log and a morning digest come with it. Nothing here has run against a real coding CLI, a real model backend or a real pull request yet."
         },
         {
