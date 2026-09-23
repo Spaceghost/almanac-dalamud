@@ -10,6 +10,8 @@
 
 <img src="images/icon.png" width="96" height="96" align="right" alt="Almanac icon">
 
+**[Site](https://spacegho.st/mods/ffxiv/almanac/about/) · [Model leaderboard](https://spacegho.st/mods/ffxiv/almanac/) · [Install](https://spacegho.st/mods/ffxiv/plugins/) · [Vote on what's next](https://spacegho.st/mods/ffxiv/almanac/vote/) · [Screenshots](https://spacegho.st/mods/ffxiv/term/gallery/?mod=almanac) · [Changelog](CHANGELOG.md)**
+
 **Local-model chat for FINAL FANTASY XIV, with game tools you control.**
 
 Almanac is a Dalamud plugin that connects a model server to an in-game chat:
