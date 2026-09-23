@@ -1,0 +1,5 @@
+# actionlint: labels of this repository's self-hosted runners (ci.yml)
+self-hosted-runner:
+  labels:
+    - almanac-dalamud
+    - fedora-dalamud
