@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import httpx
+import httpx2
 
 SEP = "__"
 
@@ -68,10 +68,12 @@ class Upstream:
     category_meta: str = ""
     categories: list[str] = field(default_factory=list)
     timeout: float = 30.0
+    # The last HTTP error status seen by _session_call (not configuration).
+    _last_status: int = field(default=0, init=False, repr=False)
 
     @classmethod
     def from_config(cls, name: str, raw: dict[str, Any]) -> "Upstream":
-        known = {k: v for k, v in raw.items() if k in cls.__dataclass_fields__}
+        known = {k: v for k, v in raw.items() if k in cls.__dataclass_fields__ and not k.startswith("_")}
         return cls(name=name, **known)
 
     def token(self) -> str | None:
@@ -96,28 +98,48 @@ class Upstream:
 
     async def _session_call(self, method: str, *args: Any) -> Any:
         from mcp import ClientSession
-        from mcp.client.streamable_http import streamablehttp_client
+        from mcp.client.streamable_http import streamable_http_client
         from mcp.types import Implementation
 
         from . import __version__
 
-        async with streamablehttp_client(self.url, headers=self._headers(), timeout=self.timeout) as (read, write, _):
-            async with ClientSession(read, write, client_info=Implementation(name="almanac", version=__version__)) as session:
-                await session.initialize()
-                return await getattr(session, method)(*args)
+        async def note_status(response: httpx2.Response) -> None:
+            # mcp 2.x turns an HTTP error into a generic JSON-RPC error; keep
+            # the status so a rejected token can be reported as such.
+            if response.status_code >= 400:
+                self._last_status = response.status_code
+
+        self._last_status = 0
+        # 30 s for connect/write/pool (self.timeout), 300 s to read a held-open
+        # SSE stream: the same defaults mcp 1.x's streamablehttp_client used.
+        http = httpx2.AsyncClient(
+            headers=self._headers(),
+            timeout=httpx2.Timeout(self.timeout, read=300.0),
+            event_hooks={"response": [note_status]},
+        )
+        info = Implementation(name="almanac", version=__version__)
+        async with (
+            http,
+            streamable_http_client(self.url, http_client=http) as (read, write),
+            ClientSession(read, write, client_info=info) as session,
+        ):
+            await session.initialize()
+            return await getattr(session, method)(*args)
 
     def _run(self, method: str, *args: Any) -> Any:
+        unreachable = (httpx2.ConnectError, ConnectionRefusedError)
         try:
             return asyncio.run(asyncio.wait_for(self._session_call(method, *args), self.timeout + 5))
-        except (httpx.ConnectError, ConnectionRefusedError) as exc:
+        except unreachable as exc:
             raise UpstreamError(f"{self.name} is not reachable at {self.url} (is it running?)") from exc
         except BaseException as exc:  # anyio wraps errors in ExceptionGroups
             root = exc
             while isinstance(root, BaseExceptionGroup) and root.exceptions:
                 root = root.exceptions[0]
-            if isinstance(root, (httpx.ConnectError, ConnectionRefusedError, OSError)):
+            if isinstance(root, (*unreachable, OSError)):
                 raise UpstreamError(f"{self.name} is not reachable at {self.url} (is it running?)") from exc
-            if isinstance(root, httpx.HTTPStatusError) and root.response.status_code == 401:
+            rejected = isinstance(root, httpx2.HTTPStatusError) and root.response.status_code == 401
+            if rejected or self._last_status == 401:
                 raise UpstreamError(f"{self.name} rejected the token (check {self.token_json or self.token_file or self.token_env})") from exc
             if isinstance(root, (KeyboardInterrupt, SystemExit)):
                 raise
@@ -130,11 +152,11 @@ class Upstream:
             meta = tool.meta or {}
             tier = str(meta.get(self.tier_meta, "")) if self.tier_meta else ""
             if not tier:
-                tier = "read" if tool.annotations and tool.annotations.readOnlyHint else "unknown"
+                tier = "read" if tool.annotations and tool.annotations.read_only_hint else "unknown"
             category = str(meta.get(self.category_meta, "")) if self.category_meta else ""
             if self.categories and category not in self.categories and tool.name != self.status_tool:
                 continue
-            tools.append(UpstreamTool(self.name, tool.name, tool.description or "", tool.inputSchema, tier.lower()))
+            tools.append(UpstreamTool(self.name, tool.name, tool.description or "", tool.input_schema, tier.lower()))
         return tools
 
     def call(self, tool: str, args: dict[str, Any]) -> tuple[str, bool]:
@@ -142,7 +164,7 @@ class Upstream:
         parts = []
         for item in result.content:
             parts.append(getattr(item, "text", None) or json.dumps(item.model_dump(), default=str)[:2000])
-        return "\n".join(parts), bool(result.isError)
+        return "\n".join(parts), bool(result.is_error)
 
 
 class Companions:

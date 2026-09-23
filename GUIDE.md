@@ -417,7 +417,11 @@ truncated. `almanac tools -v` prints the JSON schema clients see.
   tools, and `kb_note`, never run on the first call: the client gets the exact
   plan (host, argv or diff). Clients that support MCP elicitation show an
   approve/decline form to the human; others must show the plan and call again
-  with `confirm=<token>`, a token bound to exactly those arguments. The local
+  with `confirm=<token>`, a token bound to exactly those arguments. On MCP
+  2026-07-28 sessions the form travels as an `InputRequiredResult`; the state
+  that comes back with the answer is sealed, bound to that tool and those
+  arguments, expires after 10 minutes and is single-use, so one approval runs
+  one call. An unanswered form (10 minutes) runs nothing. The local
   agent never gets destructive tools, gets change tools only with
   `--allow-change`, and then asks y/N (or uses a runbook's `approve:` list).
 - **Audit:** every tool run, plan, approval, refusal and companion call is
@@ -982,7 +986,8 @@ observed working; say what is unverified in the entry itself, the way
 ## Untested
 
 - MCP elicitation with a real interactive client (tested with the MCP SDK's
-  client only; Claude Code and Codex were tested calling read tools).
+  client only, on both the handshake protocol and 2026-07-28; Claude Code and
+  Codex were tested calling read tools, with MCP SDK 1.x on the server).
 - `claude mcp add` with the `${ALMANAC_TOKEN}` header (the same header in a
   `--mcp-config` file was tested).
 - `deploy/quadlet` and `deploy/incus` on real hardware.
