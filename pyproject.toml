@@ -13,7 +13,7 @@ requires-python = ">=3.11"
 # Pinned: these are the only runtime dependencies. mcp brings starlette,
 # uvicorn, httpx, anyio and pydantic, which the gateway reuses.
 dependencies = [
-  "mcp==1.30.0",
+  "mcp==2.2.0",
   "starlette==1.6.0",
   "uvicorn==0.53.0",
   "httpx==0.28.1",
