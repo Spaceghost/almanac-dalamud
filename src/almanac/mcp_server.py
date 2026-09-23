@@ -6,10 +6,21 @@
 
 change/destructive tools: if the client advertised the MCP *elicitation*
 capability the server asks the human directly (form with one "approve"
-checkbox, showing the exact plan). Otherwise the first call returns the plan
-and a token, and the model must show the plan and call again with
-``confirm=<token>``. Either way ``service.Almanac.call`` makes the decision
-and writes the audit log.
+checkbox, showing the exact plan):
+
+* handshake-era sessions (protocol up to 2025-11-25): an ``elicitation/create``
+  request to the client while the call waits, for at most ``ELICIT_TIMEOUT``;
+* 2026-07-28 sessions, which forbid server-initiated requests: the call
+  returns an ``InputRequiredResult`` carrying the same form and an opaque
+  ``request_state``. The client asks the human and retries with the answer.
+  The state is sealed by the SDK's ``RequestStateBoundary`` (bound to the tool
+  and its arguments, expiring) and is also a single-use server-side nonce, so
+  one approval runs the call at most once.
+
+Otherwise (no elicitation, or the elicitation failed or timed out) the first
+call returns the plan and a token, and the model must show the plan and call
+again with ``confirm=<token>``. Either way ``service.Almanac.call`` makes the
+decision and writes the audit log.
 """
 
 from __future__ import annotations
@@ -17,16 +28,21 @@ from __future__ import annotations
 import hmac
 import json
 import logging
+import secrets
+import time
 from typing import Any
 
 import anyio
-import mcp.types as types
+from mcp import types
+from mcp.server.context import ServerRequestContext
 from mcp.server.lowlevel import Server
+from mcp.server.request_state import RequestStateBoundary, RequestStateSecurity
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from mcp.types.version import MODERN_PROTOCOL_VERSIONS
 from starlette.types import Receive, Scope, Send
 
 from . import __version__
-from .service import Almanac
+from .service import Almanac, Outcome
 
 log = logging.getLogger("almanac.mcp")
 
@@ -39,53 +55,146 @@ When you learn something durable (a fix, a path, a gotcha), propose it with
 kb_note. Never put secrets in notes; reference the file that holds them."""
 
 
+# How long a human has to answer an approval form. On a timeout nothing runs.
+ELICIT_TIMEOUT = 600.0
+# The input_requests key of the approval form on 2026-07-28 sessions.
+APPROVAL_KEY = "almanac_approval"
+APPROVAL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"approve": {"type": "boolean", "title": "Approve and run", "default": False}},
+    "required": ["approve"],
+}
+DECLINED = "The user declined. Nothing was run."
+STALE = "This approval expired or was already used. Nothing was run. Call the tool again to ask the user."
+
+
+class PendingApprovals:
+    """Single-use approval nonces for the 2026-07-28 input-required round trip.
+
+    A nonce is minted when the approval form is sent, bound to exactly one
+    (tool, arguments, caller) and ``ttl`` seconds; ``take`` consumes it whether
+    or not it matches, so an answer can be used at most once.
+    """
+
+    def __init__(self, ttl: float = ELICIT_TIMEOUT, limit: int = 256) -> None:
+        self.ttl = ttl
+        self.limit = limit
+        self._pending: dict[str, tuple[str, str, float]] = {}
+
+    @staticmethod
+    def _binding(name: str, args: dict[str, Any], caller: str) -> str:
+        return json.dumps([name, args, caller], sort_keys=True, default=str)
+
+    def mint(self, name: str, args: dict[str, Any], caller: str) -> str:
+        now = time.monotonic()
+        self._pending = {k: v for k, v in self._pending.items() if v[2] > now}
+        while len(self._pending) >= self.limit:
+            self._pending.pop(next(iter(self._pending)))
+        nonce = secrets.token_urlsafe(32)
+        self._pending[nonce] = (name, self._binding(name, args, caller), now + self.ttl)
+        return nonce
+
+    def take(self, nonce: str, name: str, args: dict[str, Any], caller: str) -> bool:
+        entry = self._pending.pop(nonce, None)
+        if entry is None:
+            return False
+        _, binding, deadline = entry
+        return time.monotonic() < deadline and hmac.compare_digest(binding, self._binding(name, args, caller))
+
+
+def _approved(answer: object) -> bool:
+    """Only an explicit accept with approve=true counts; anything else is a no."""
+    if isinstance(answer, dict):
+        try:
+            answer = types.ElicitResult.model_validate(answer)
+        except ValueError:
+            return False
+    if not isinstance(answer, types.ElicitResult) or answer.action != "accept":
+        return False
+    return (answer.content or {}).get("approve") is True
+
+
+def _result(outcome: Outcome) -> types.CallToolResult:
+    return types.CallToolResult(content=[types.TextContent(type="text", text=outcome.text)], is_error=outcome.is_error)
+
+
+def _text(text: str, is_error: bool = False) -> types.CallToolResult:
+    return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=is_error)
+
+
 def build_server(almanac: Almanac, transport: str) -> Server:
-    server: Server = Server("almanac", version=__version__, instructions=INSTRUCTIONS)
+    pending = PendingApprovals(ELICIT_TIMEOUT)
 
-    @server.list_tools()
-    async def list_tools() -> list[types.Tool]:
-        return [
-            types.Tool(
-                name=spec["name"],
-                description=spec["description"],
-                inputSchema=spec["input_schema"],
-                annotations=types.ToolAnnotations(
-                    readOnlyHint=spec["safety"] == "read",
-                    destructiveHint=spec["safety"] == "destructive",
-                ),
-            )
-            for spec in almanac.catalogue()
-        ]
-
-    @server.call_tool(validate_input=False)
-    async def call_tool(name: str, arguments: dict[str, Any] | None) -> types.CallToolResult:
-        ctx = server.request_context
-        session = ctx.session
-        params = session.client_params
-        client = params.clientInfo.name if params else "unknown"
-        caller = f"mcp-{transport}:{client}"
-        outcome = await anyio.to_thread.run_sync(almanac.call, name, arguments or {}, caller)
-        caps = params.capabilities if params else None
-        if outcome.needs_confirmation and caps is not None and caps.elicitation is not None:
-            try:
-                answer = await session.elicit(
-                    message=f"almanac wants to run a {almanac.safety_of(name)} action:\n\n{outcome.plan}\n\nApprove?",
-                    requestedSchema={
-                        "type": "object",
-                        "properties": {"approve": {"type": "boolean", "title": "Approve and run", "default": False}},
-                        "required": ["approve"],
-                    },
+    async def list_tools(ctx: ServerRequestContext[Any], params: types.PaginatedRequestParams | None) -> types.ListToolsResult:
+        return types.ListToolsResult(
+            tools=[
+                types.Tool(
+                    name=spec["name"],
+                    description=spec["description"],
+                    input_schema=spec["input_schema"],
+                    annotations=types.ToolAnnotations(
+                        read_only_hint=spec["safety"] == "read",
+                        destructive_hint=spec["safety"] == "destructive",
+                    ),
                 )
-                approved = answer.action == "accept" and bool((answer.content or {}).get("approve"))
-            except Exception as exc:  # client claimed the capability but failed: fall back to the token
-                log.warning("elicitation failed (%s); falling back to confirm token", exc)
-            else:
-                if not approved:
-                    almanac.audit("declined", name, dict(arguments or {}), caller, via="elicitation")
-                    return types.CallToolResult(content=[types.TextContent(type="text", text="The user declined. Nothing was run.")])
-                outcome = await anyio.to_thread.run_sync(lambda: almanac.call(name, arguments or {}, caller, approved=True))
-        return types.CallToolResult(content=[types.TextContent(type="text", text=outcome.text)], isError=outcome.is_error)
+                for spec in almanac.catalogue()
+            ]
+        )
 
+    async def decide(name: str, arguments: dict[str, Any], caller: str, approved: bool) -> types.CallToolResult:
+        if not approved:
+            almanac.audit("declined", name, dict(arguments), caller, via="elicitation")
+            return _text(DECLINED)
+        outcome = await anyio.to_thread.run_sync(lambda: almanac.call(name, arguments, caller, approved=True))
+        return _result(outcome)
+
+    async def call_tool(
+        ctx: ServerRequestContext[Any], params: types.CallToolRequestParams
+    ) -> types.CallToolResult | types.InputRequiredResult:
+        name = params.name
+        arguments = dict(params.arguments or {})
+        session = ctx.session
+        info = session.client_params.client_info if session.client_params else None
+        caller = f"mcp-{transport}:{info.name if info else 'unknown'}"
+
+        if params.request_state is not None:
+            # A retry carrying the human's answer. The boundary has already
+            # checked the seal, expiry and tool/arguments binding; the nonce
+            # makes the answer single-use.
+            if not pending.take(params.request_state, name, arguments, caller):
+                almanac.audit("refused", name, arguments, caller, via="elicitation", reason="stale approval")
+                return _text(STALE, is_error=True)
+            answer = (params.input_responses or {}).get(APPROVAL_KEY)
+            return await decide(name, arguments, caller, _approved(answer))
+
+        outcome = await anyio.to_thread.run_sync(almanac.call, name, arguments, caller)
+        caps = session.client_capabilities
+        if not outcome.needs_confirmation or caps is None or caps.elicitation is None:
+            return _result(outcome)
+        message = f"almanac wants to run a {almanac.safety_of(name)} action:\n\n{outcome.plan}\n\nApprove?"
+
+        if ctx.protocol_version in MODERN_PROTOCOL_VERSIONS:
+            form = types.ElicitRequest(params=types.ElicitRequestFormParams(message=message, requested_schema=APPROVAL_SCHEMA))
+            return types.InputRequiredResult(input_requests={APPROVAL_KEY: form}, request_state=pending.mint(name, arguments, caller))
+
+        try:
+            with anyio.fail_after(ELICIT_TIMEOUT):
+                answer = await session.elicit_form(message=message, requested_schema=APPROVAL_SCHEMA, related_request_id=ctx.request_id)
+        except Exception as exc:  # client claimed the capability but failed or timed out: fall back to the token
+            log.warning("elicitation failed (%r); falling back to confirm token", exc)
+            return _result(outcome)
+        return await decide(name, arguments, caller, _approved(answer))
+
+    server: Server = Server(
+        "almanac",
+        version=__version__,
+        instructions=INSTRUCTIONS,
+        on_list_tools=list_tools,
+        on_call_tool=call_tool,
+    )
+    # Seal the 2026-07-28 request_state: bound to the tool and its arguments,
+    # expiring with the approval, unreadable and unforgeable by the client.
+    server.middleware.append(RequestStateBoundary(RequestStateSecurity.ephemeral(ttl=ELICIT_TIMEOUT), default_audience="almanac"))
     return server
 
 
