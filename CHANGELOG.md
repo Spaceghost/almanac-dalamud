@@ -13,9 +13,9 @@ Statuses mean exactly what they mean in the What's new view in game:
 * **BETA** — merged, but not yet verified in game.
 * **SOON** — still being built.
 
-## [Unreleased] — In the workshop
+## [0.2.1] — Released 2026-09-23
 
-Merged, not in a release yet.
+BETA entries are in this release but have not been verified in game yet; they become NEW or FIX once they have been seen working.
 
 * The MCP server and the companion client are on MCP SDK 2.2 (from 1.30). Clients speaking the new 2026-07-28 protocol get the same approve/decline form for change and destructive tools, sent back with the result instead of as a request of its own; one approval runs one call, and a declined, cancelled, unanswered (10 minutes) or replayed approval runs nothing. Tested with the MCP SDK's own client only, not yet with Claude Code or Codex on 2.2.
 * `ai code` now starts Claude Code on your local model by default instead of Codex: over six red-to-green tasks on the P4000 both passed all six, Claude in 302 seconds against 518. `ai code --tool codex` (or `coder` under `[local]`) still picks Codex, and whichever tool is missing falls back to the other.
