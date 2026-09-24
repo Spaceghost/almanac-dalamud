@@ -39,6 +39,7 @@ public sealed class SetupWindow : Window, IDisposable
     private string almanacToken = "";
 
     private IReadOnlyList<GpuAdapter> adapters = [];
+    private Task<(IReadOnlyList<GpuAdapter> Adapters, int Best)>? detectingGpu;
     private int adapterIndex;
     private int manualVramGb;
     private Recommendations? recommendations;
@@ -71,8 +72,12 @@ public sealed class SetupWindow : Window, IDisposable
         useAlmanac = s.Engine == AlmanacSettings.EngineAlmanac;
         almanacUrl = s.AlmanacUrl;
         almanacToken = s.AlmanacToken;
-        adapters = GpuInfo.Adapters();
-        adapterIndex = adapters.Count == 0 ? 0 : adapters.Select((a, i) => (a, i)).MaxBy(x => x.a.DedicatedVideoMemory).i;
+        // Creating a Vulkan instance and a DXGI factory takes long enough to hitch a frame: keep it off the draw thread.
+        detectingGpu = Task.Run(() =>
+        {
+            var found = GpuInfo.Adapters();
+            return (found, Math.Max(0, GpuInfo.BestIndex(found, GpuInfo.GameAdapterName())));
+        });
         loadingRecommendations ??= new RecommendationSource(engine.Quick, $"{s.LeaderboardUrl.TrimEnd('/')}/recommendations.json",
             () => store.Get("cache.recommendations"), v => store.Set("cache.recommendations", v)).LoadAsync(cts.Token);
         Detect();
@@ -221,6 +226,19 @@ public sealed class SetupWindow : Window, IDisposable
     private void DrawGpu()
     {
         var s = plugin.Settings;
+        if (detectingGpu is { IsCompleted: true } done)
+        {
+            if (done.IsCompletedSuccessfully)
+                (adapters, adapterIndex) = done.Result;
+            detectingGpu = null;
+        }
+
+        if (detectingGpu != null)
+        {
+            ImGui.TextDisabled("Reading your GPUs...");
+            return;
+        }
+
         if (adapters.Count == 0)
         {
             ImGui.TextColored(ImGuiColors.DalamudOrange, "Could not read your GPU. Enter its video memory:");
@@ -232,7 +250,7 @@ public sealed class SetupWindow : Window, IDisposable
         {
             for (var i = 0; i < adapters.Count; i++)
             {
-                if (ImGui.RadioButton($"{adapters[i].Name} — {adapters[i].VramMb / 1024.0:0.#} GB", adapterIndex == i))
+                if (ImGui.RadioButton($"{adapters[i].Name} — {adapters[i].VramMb / 1024.0:0.#} GB##gpu{i}", adapterIndex == i))
                     adapterIndex = i;
             }
 
