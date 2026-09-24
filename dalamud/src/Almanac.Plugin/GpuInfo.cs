@@ -80,16 +80,47 @@ public static unsafe class GpuInfo
     }
 
     /// <summary>"linux" under Wine/Proton (it is a Linux machine), else "windows".</summary>
+    /// <remarks>
+    /// Some Wine builds (wine-xiv-staging, as XIVLauncher ships) hide <c>wine_get_version</c> from
+    /// GetProcAddress, so it is only the first of three signs: Wine's <c>\\?\unix\</c> path namespace, which
+    /// maps the host's root, and its <c>HKLM\Software\Wine</c> key are there in every build.
+    /// </remarks>
     public static string OsFamily()
+    {
+        if (!OperatingSystem.IsWindows())
+            return OperatingSystem.IsLinux() ? "linux" : OperatingSystem.IsMacOS() ? "macos" : "other";
+        return IsWine() ? "linux" : "windows";
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static bool IsWine()
     {
         try
         {
-            var ntdll = NativeLibrary.Load("ntdll.dll");
-            return NativeLibrary.TryGetExport(ntdll, "wine_get_version", out _) ? "linux" : "windows";
+            if (NativeLibrary.TryLoad("ntdll.dll", out var ntdll) && NativeLibrary.TryGetExport(ntdll, "wine_get_version", out _))
+                return true;
         }
-        catch (DllNotFoundException)
+        catch (Exception ex) when (ex is BadImageFormatException or DllNotFoundException)
         {
-            return OperatingSystem.IsLinux() ? "linux" : OperatingSystem.IsMacOS() ? "macos" : "other";
+        }
+
+        try
+        {
+            if (Directory.Exists(@"\\?\unix\"))
+                return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+        }
+
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"Software\Wine");
+            return key != null;
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            return false;
         }
     }
 

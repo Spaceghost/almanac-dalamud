@@ -49,13 +49,15 @@ class Guard:
         self._mem = mem_reader
         self._gpu = gpu_reader
 
-    def may_load(self, already_loaded: bool) -> Verdict:
+    def may_load(self, already_loaded: bool, picked_by_auto: bool = False) -> Verdict:
+        """``picked_by_auto``: ``auto`` chose the model for the VRAM free right now, or as its fallback when the
+        GPU cannot be read (autoselect.py), so the fixed ``min_gpu_free_mb`` does not apply; host memory still does."""
         if already_loaded:
             return Verdict(True, "model already resident")
         mem = self._mem()
         if mem < self.min_mem:
             return Verdict(False, f"host memory is tight ({mem} MB available < {self.min_mem} MB); not loading a model")
-        if self.gpu_uuid and self.min_gpu:
+        if self.gpu_uuid and self.min_gpu and not picked_by_auto:
             free = self._gpu(self.gpu_uuid)
             if free is None:
                 return Verdict(False, "cannot read the inference GPU's free memory; not loading a model")

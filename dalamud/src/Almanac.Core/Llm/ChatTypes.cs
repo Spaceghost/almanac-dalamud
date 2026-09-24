@@ -44,6 +44,12 @@ public sealed class ChatRequest
     public double? Temperature { get; init; }
 
     public int? MaxTokens { get; init; }
+
+    /// <summary>
+    /// OpenAI's <c>reasoning_effort</c>; "none" turns a thinking model's reasoning off (Ollama honours it), so a
+    /// short in-game answer is not spent thinking. Null leaves the server's default.
+    /// </summary>
+    public string? ReasoningEffort { get; init; }
 }
 
 public enum DeltaKind

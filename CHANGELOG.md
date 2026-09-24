@@ -13,6 +13,15 @@ Statuses mean exactly what they mean in the What's new view in game:
 * **BETA** — merged, but not yet verified in game.
 * **SOON** — still being built.
 
+## [Unreleased] — In the workshop
+
+Merged, not in a release yet.
+
+* In game, saving settings no longer freezes the game for over a second: every Next in the setup and every edit in the settings wrote each of the 24 settings in its own transaction, which under Wine took about 50 ms apiece. They are now written in one transaction, only those that changed, and the store no longer waits for a disk flush on every commit (a crash still cannot corrupt it).
+* In game, thinking models (qwen3.5, deepseek-r1, ...) answer instead of spending the whole reply budget thinking and returning nothing: reasoning is off unless you turn on "Let thinking models reason first" in the settings.
+* The plugin recognises Wine on builds that hide `wine_get_version` (the wine-xiv-staging XIVLauncher ships), by Wine's `\\?\unix\` path namespace and its registry key, so on Linux the setup offers what fits a Linux machine.
+* The gateway can serve model `auto`: per request, the largest of `[gateway] auto_models` that fits the VRAM free right now, measured where the gateway runs and reported at `/v1/almanac/gpu`. A game on the same card can reserve VRAM (`PUT /v1/almanac/gpu/reservations/<owner>`, with a TTL); almanac then unloads a model that no longer fits at once and serves a smaller one until the reservation ends. Run on the P4000 with FFXIV in a neighbouring container: qwen3.5:4b while playing, qwen3.5:9b otherwise.
+
 ## [0.2.1] — Released 2026-09-23
 
 BETA entries are in this release but have not been verified in game yet; they become NEW or FIX once they have been seen working.

@@ -87,6 +87,8 @@ public sealed class ChatClient(HttpClient http, string baseUrl, string? apiKey =
             body["temperature"] = t;
         if (request.MaxTokens is { } max)
             body["max_tokens"] = max;
+        if (!string.IsNullOrEmpty(request.ReasoningEffort))
+            body["reasoning_effort"] = request.ReasoningEffort;
         if (request.Tools is { Count: > 0 } tools)
         {
             var array = new JsonArray();

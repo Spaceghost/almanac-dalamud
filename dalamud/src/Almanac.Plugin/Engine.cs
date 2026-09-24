@@ -65,7 +65,18 @@ public sealed class Engine(AlmanacStore store, XivMcpLink xivmcp, Func<AlmanacSe
     }
 
     /// <summary>What we know about a model's tool calling: a stored probe, else a guess from its name.</summary>
-    public string Capability(string model) => store.GetCapability(CapabilityKey(model)) ?? ModelCapabilities.FromName(model);
+    /// <remarks>The chat header asks every frame; the answer is kept a few seconds instead of querying the store per frame.</remarks>
+    public string Capability(string model)
+    {
+        var key = CapabilityKey(model);
+        if (capabilityCache is { } c && c.Key == key && Environment.TickCount64 - c.At < 5000)
+            return c.Value;
+        var value = store.GetCapability(key) ?? ModelCapabilities.FromName(model);
+        capabilityCache = (key, value, Environment.TickCount64);
+        return value;
+    }
+
+    private (string Key, string Value, long At)? capabilityCache;
 
     public string CapabilityKey(string model) => $"{ServerDetector.RootOf(ModelTarget().BaseUrl)}|{model}";
 
@@ -128,6 +139,7 @@ public sealed class Engine(AlmanacStore store, XivMcpLink xivmcp, Func<AlmanacSe
             MaxSteps = s.MaxSteps,
             Temperature = s.Temperature,
             MaxTokens = s.MaxTokens,
+            ReasoningEffort = s.Thinking ? null : "none",
         });
     }
 
@@ -151,6 +163,7 @@ public sealed class Engine(AlmanacStore store, XivMcpLink xivmcp, Func<AlmanacSe
     /// <summary>Settings changed: rebuild clients on next use.</summary>
     public void Invalidate()
     {
+        capabilityCache = null;
         // The old tool source owns an MCP client with a semaphore in it; dropping the reference would leak it.
         xivTools?.Dispose();
         xivTools = null;

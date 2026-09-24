@@ -41,6 +41,14 @@ DEFAULTS: dict[str, Any] = {
         # Client model name (fnmatch pattern) -> backend model. First match wins.
         "models": {"claude-*": "qwen3.5:9b", "gpt-*": "qwen3.5:9b", "local*": "qwen3.5:9b"},
         "request_timeout": 600,
+        # "auto" as a model name (in a request, default_model or [gateway.models]):
+        # the first of these, best first, that fits the VRAM free right now
+        # (autoselect.py). Empty = "auto" is not offered. They count as allowed.
+        "auto_models": [],
+        # Used when the GPU cannot be read at all; empty = the last of auto_models.
+        "auto_fallback": "",
+        # VRAM kept free for everything else; empty = a tenth of the card, at least 512 MB.
+        "auto_headroom_mb": "",
     },
     "guard": {
         # Refuse to load a model when host MemAvailable is below this.

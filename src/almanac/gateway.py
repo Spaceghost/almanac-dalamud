@@ -12,6 +12,12 @@ Ollama lacks for this use:
   unload the resident model when memory runs low,
 * model residency (residency.py): keep the model pinned while configured
   processes (e.g. a game) run,
+* ``auto`` (autoselect.py): per request, the largest configured model that
+  fits the VRAM free right now, and ``/v1/almanac/gpu`` reporting that VRAM
+  so a client (the Dalamud setup) need not measure it from where it runs,
+  and VRAM reservations (``/v1/almanac/gpu/reservations/<owner>``) through
+  which a game on the same card makes almanac step down to a smaller model
+  at once instead of on the next request,
 * ``/v1/messages/count_tokens`` (Claude Code calls it; Ollama has none) as a
   character-based estimate,
 * for ``/v1/responses``: Codex's tool namespaces flattened for Ollama and
@@ -29,7 +35,7 @@ import fnmatch
 import hmac
 import json
 import logging
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 import httpx
 from starlette.applications import Starlette
@@ -39,16 +45,24 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from . import codex_compat
+from .autoselect import AUTO, AutoSelector, Choice, Footprints, Reservations
 from .config import Config
+from .gpu import MB, Gpu, inference_gpu, read_gpus
 from .guard import Guard
 from .residency import Residency
 
 log = logging.getLogger("almanac.gateway")
 
 
+def allowed_models(settings: dict[str, Any]) -> list[str]:
+    """[gateway] allowed_models, plus auto_models and "auto" itself when auto is configured."""
+    auto = [str(m) for m in settings.get("auto_models", [])]
+    return list(settings.get("allowed_models", [])) + auto + ([AUTO] if auto else [])
+
+
 def map_model(requested: str, settings: dict[str, Any]) -> str | None:
-    """Client model name -> allowed backend model, or None if not allowed."""
-    allowed = list(settings.get("allowed_models", []))
+    """Client model name -> allowed backend model (or "auto"), or None if not allowed."""
+    allowed = allowed_models(settings)
     if requested in allowed:
         return requested
     for pattern, target in dict(settings.get("models", {})).items():
@@ -74,19 +88,30 @@ def _error(api: str, status: int, message: str) -> JSONResponse:
 
 
 class Gateway:
-    def __init__(self, config: Config, guard: Guard | None = None, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        config: Config,
+        guard: Guard | None = None,
+        client: httpx.AsyncClient | None = None,
+        gpus: Callable[[], list[Gpu]] = read_gpus,
+    ) -> None:
         self.settings = config.section("gateway")
         self.backend = str(self.settings["backend"]).rstrip("/")
         self.guard = guard or Guard(config.section("guard"))
         self.client = client or httpx.AsyncClient(timeout=httpx.Timeout(float(self.settings.get("request_timeout", 600)), connect=5))
         self._token = config.read_token()
         self.inflight = 0  # model requests being served; /healthz reports it so clients can tell busy from free
+        self._gpus = gpus
+        self.gpu_uuid = str(config.section("guard").get("gpu_uuid", ""))
+        self.auto = AutoSelector(self.settings, lambda: inference_gpu(self._gpus(), self.gpu_uuid), Footprints(config.state_dir),
+                                 Reservations(config.state_dir))
         residency = config.section("residency")
         model = str(residency.get("model") or self.settings.get("default_model"))
-        if residency.get("keep_loaded_while_process") and model not in self.settings.get("allowed_models", []):
+        if residency.get("keep_loaded_while_process") and model not in allowed_models(self.settings):
             log.error("residency disabled: %s is not in [gateway] allowed_models", model)
             residency = {**residency, "keep_loaded_while_process": []}
-        self.residency = Residency(residency, model, self.backend, self.client, self.guard, config.state_dir)
+        resolve = self.choose_model if model == AUTO and self.auto.enabled else None
+        self.residency = Residency(residency, model, self.backend, self.client, self.guard, config.state_dir, resolve=resolve)
 
     # -- helpers -----------------------------------------------------------
     def authorized(self, request: Request) -> bool:
@@ -105,6 +130,37 @@ class Gateway:
         with contextlib.suppress(httpx.HTTPError):
             await self.client.post(f"{self.backend}/api/generate", json={"model": model, "keep_alive": 0}, timeout=30)
 
+    async def backend_state(self) -> tuple[dict[str, int], dict[str, int]]:
+        """(installed: model -> file bytes from /api/tags, loaded: model -> VRAM bytes from /api/ps); empty on errors."""
+        async def read(path: str, size_key: str) -> dict[str, int]:
+            try:
+                response = await self.client.get(f"{self.backend}{path}", timeout=5)
+                return {str(m["name"]): int(m.get(size_key) or 0) for m in response.json().get("models", [])}
+            except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
+                return {}
+        installed, loaded = await asyncio.gather(read("/api/tags", "size"), read("/api/ps", "size_vram"))
+        return installed, loaded
+
+    async def choose(self) -> tuple[Choice, dict[str, int]]:
+        """The auto model for right now, and what is loaded (for the caller to make room)."""
+        installed, loaded = await self.backend_state()
+        return await asyncio.to_thread(self.auto.choose, installed, loaded), loaded
+
+    async def choose_model(self) -> str:
+        return (await self.choose())[0].model
+
+    async def step_down(self) -> Choice | None:
+        """Unload our resident auto models that are not the one that fits now. The fitting one
+        loads on the next request, as after any unload."""
+        if not self.auto.enabled:
+            return None
+        choice, loaded = await self.choose()
+        for model in loaded:
+            if model in self.auto.models and model != choice.model:
+                log.info("unloading %s to make room: %s", model, choice.reason)
+                await self.unload(model)
+        return choice
+
     # -- routes ------------------------------------------------------------
     async def healthz(self, request: Request) -> Response:
         loaded = await self.loaded_models()
@@ -115,11 +171,59 @@ class Gateway:
     async def models(self, request: Request) -> Response:
         if not self.authorized(request):
             return _error("openai", 401, "missing or wrong token")
-        names = sorted(set(self.settings.get("allowed_models", [])) | {m for m in self.settings.get("models", {}) if not any(c in m for c in "*?[")})
+        names = sorted(set(allowed_models(self.settings)) | {m for m in self.settings.get("models", {}) if not any(c in m for c in "*?[")})
         data = [{"id": n, "object": "model", "type": "model", "display_name": n, "owned_by": "almanac"} for n in names]
         # "data": OpenAI/Anthropic list shape. "models": Codex's catalogue field;
         # left empty so Codex falls back to its own/model_catalog_json metadata.
         return JSONResponse({"object": "list", "data": data, "has_more": False, "models": []})
+
+    async def gpu(self, request: Request) -> Response:
+        """The inference GPU as this machine sees it, and what a model may use of it (see gpu.py)."""
+        if not self.authorized(request):
+            return _error("openai", 401, "missing or wrong token")
+        gpus = await asyncio.to_thread(self._gpus)
+        card = inference_gpu(gpus, self.gpu_uuid)
+        installed, loaded = await self.backend_state()
+        body: dict[str, Any] = {
+            "gpus": [g.to_json() for g in gpus],
+            "inference": card.to_json() if card else None,
+            "loaded": [{"model": name, "vram_mb": size // MB} for name, size in loaded.items()],
+            "installed": sorted(installed),
+        }
+        body["reservations"] = self.auto.reservations.current()
+        if card is not None:
+            # Switching models gives back what the resident ones hold; the headroom stays free for everything else,
+            # and what other workloads reserved is off limits.
+            reclaim = sum(loaded.values()) // MB
+            headroom = self.auto.headroom_mb(card.total_mb)
+            budget = self.auto.budget(card, loaded) if self.auto.enabled else card.free_mb + reclaim - headroom
+            body.update({"reclaimable_mb": reclaim, "headroom_mb": headroom, "budget_mb": max(0, budget)})
+        if self.auto.enabled:
+            choice = await asyncio.to_thread(self.auto.choose, installed, loaded)
+            body["auto"] = {"models": self.auto.models, "fallback": self.auto.fallback, "choice": choice.model, "reason": choice.reason}
+        return JSONResponse(body)
+
+    async def reservation(self, request: Request) -> Response:
+        """PUT {"mb": N, "ttl_s": optional seconds} holds N MB of the card for ``owner``; DELETE releases it."""
+        if not self.authorized(request):
+            return _error("openai", 401, "missing or wrong token")
+        owner = request.path_params["owner"]
+        if request.method == "DELETE":
+            released = self.auto.reservations.release(owner)
+            return JSONResponse({"owner": owner, "released": released, "reservations": self.auto.reservations.current()})
+        try:
+            body = await request.json()
+            mb = int(body["mb"])
+            ttl = body.get("ttl_s")
+            ttl = None if ttl is None else float(ttl)
+        except (ValueError, KeyError, TypeError):
+            return _error("openai", 400, 'body must be {"mb": <int>, "ttl_s": <seconds, optional>}')
+        if mb < 0 or (ttl is not None and ttl <= 0):
+            return _error("openai", 400, "mb must be >= 0 and ttl_s > 0")
+        self.auto.reservations.hold(owner, mb, ttl)
+        choice = await self.step_down()
+        return JSONResponse({"owner": owner, "mb": mb, "ttl_s": ttl, "reservations": self.auto.reservations.current(),
+                             "auto": None if choice is None else {"choice": choice.model, "reason": choice.reason}})
 
     async def count_tokens(self, request: Request) -> Response:
         if not self.authorized(request):
@@ -138,9 +242,21 @@ class Gateway:
         target = map_model(requested, self.settings)
         if target is None:
             return _error(api, 404, f"model {requested!r} is not mapped to an allowed local model")
+        picked_by_auto = target == AUTO and self.auto.enabled
+        if picked_by_auto:
+            choice, loaded = await self.choose()
+            target = choice.model
+            log.info("auto -> %s: %s", target, choice.reason)
+            # Make room: our other auto models go first, so switching never needs both in VRAM.
+            for other in loaded:
+                if other in self.auto.models and other != target:
+                    await self.unload(other)
+            resident = target in loaded
+        else:
+            resident = target in await self.loaded_models()
         body["model"] = target
         namespaces = codex_compat.flatten_request(body) if request.url.path == "/v1/responses" else {}
-        verdict = await asyncio.to_thread(self.guard.may_load, target in await self.loaded_models())
+        verdict = await asyncio.to_thread(self.guard.may_load, resident, picked_by_auto)
         if not verdict.ok:
             log.warning("refused %s: %s", request.url.path, verdict.reason)
             return _error(api, 503, verdict.reason)
@@ -208,6 +324,8 @@ class Gateway:
         routes = [
             Route("/healthz", self.healthz),
             Route("/v1/models", self.models),
+            Route("/v1/almanac/gpu", self.gpu),
+            Route("/v1/almanac/gpu/reservations/{owner}", self.reservation, methods=["PUT", "DELETE"]),
             Route("/v1/messages/count_tokens", self.count_tokens, methods=["POST"]),
             Route("/v1/messages", self.proxy, methods=["POST"]),
             Route("/v1/chat/completions", self.proxy, methods=["POST"]),

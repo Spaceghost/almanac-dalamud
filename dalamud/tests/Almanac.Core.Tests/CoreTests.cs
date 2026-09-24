@@ -232,6 +232,27 @@ public sealed class StoreAndChatTests
     }
 
     [Fact]
+    public void SettingsSaveWritesOnlyChangedKeysInOneTransaction()
+    {
+        using var store = AlmanacStore.InMemory();
+        var s = AlmanacSettings.Load(store);
+        s.Save(store);
+        Assert.Equal(0, store.SetMany(store.GetPrefix("settings.")));  // saved values read back unchanged
+        s.Model = "auto";
+        Assert.Equal(1, store.SetMany([KeyValuePair.Create("settings.Model", "auto"), KeyValuePair.Create("settings.Temperature", store.Get("settings.Temperature")!)]));
+        Assert.Equal("auto", AlmanacSettings.Load(store).Model);
+    }
+
+    [Fact]
+    public void ReasoningEffortIsSentOnlyWhenSet()
+    {
+        ChatRequest Request(string? effort) => new() { Model = "auto", Messages = [ChatMessage.User("hi")], ReasoningEffort = effort };
+        Assert.Equal("none", ChatClient.BuildBody(Request("none"))["reasoning_effort"]!.GetValue<string>());
+        Assert.False(ChatClient.BuildBody(Request(null)).ContainsKey("reasoning_effort"));
+        Assert.False(new AlmanacSettings().Thinking);  // off unless asked for
+    }
+
+    [Fact]
     public void ThreadsMessagesAndForks()
     {
         using var store = AlmanacStore.InMemory();
