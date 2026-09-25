@@ -52,6 +52,16 @@ public sealed class SetupWindow : Window, IDisposable
 
     private Task? connecting;
 
+    // The almanac engine's own view of its GPU (it may be another machine than the game's).
+    private Task<ServerGpu?>? readingServerGpu;
+    private ServerGpu? serverGpu;
+
+    // One-click install of a recommended model into Ollama.
+    private Task? pulling;
+    private string? pullModel;
+    private volatile PullProgress? pullProgress;
+    private string? pullMessage;
+
     public SetupWindow(Plugin plugin, Engine engine, AlmanacStore store, XivMcpLink xivmcp)
         : base("Almanac setup###AlmanacSetup")
     {
@@ -226,6 +236,12 @@ public sealed class SetupWindow : Window, IDisposable
     private void DrawGpu()
     {
         var s = plugin.Settings;
+        if (useAlmanac && DrawServerGpu())
+        {
+            DrawRecommendations();
+            return;
+        }
+
         if (detectingGpu is { IsCompleted: true } done)
         {
             if (done.IsCompletedSuccessfully)
@@ -271,7 +287,59 @@ public sealed class SetupWindow : Window, IDisposable
         var budget = Budget();
         ImGui.Spacing();
         ImGui.TextColored(ImGuiColors.DalamudViolet, $"About {budget / 1024.0:0.#} GB of VRAM for the model.");
+        DrawRecommendations();
+    }
 
+    /// <summary>
+    /// The engine's GPU, as it reports it: free VRAM now, what a game reserved, and which model "auto" would pick.
+    /// False while there is nothing to show (still asking, or an engine without the report): the local view is used.
+    /// </summary>
+    private bool DrawServerGpu()
+    {
+        if (readingServerGpu == null && serverGpu == null)
+            readingServerGpu = ServerGpu.ReadAsync(engine.Quick, ServerDetector.NormalizeBase(almanacUrl), almanacToken, cts.Token);
+        if (readingServerGpu is { IsCompleted: true } read)
+        {
+            serverGpu = read.IsCompletedSuccessfully ? read.Result : null;
+            readingServerGpu = null;
+            if (serverGpu == null)
+                readingServerGpu = Task.FromResult<ServerGpu?>(null); // asked once; fall back to the local view
+        }
+
+        if (serverGpu is not { } g)
+        {
+            if (readingServerGpu is { IsCompleted: false })
+                ImGui.TextDisabled("Asking the almanac engine about its GPU…");
+            return false;
+        }
+
+        ImGui.TextUnformatted($"The almanac engine runs its models on {g.Name}: {g.TotalMb / 1024.0:0.#} GB, {g.FreeMb / 1024.0:0.#} GB free now.");
+        foreach (var (model, mb) in g.Loaded)
+            ImGui.TextDisabled($"Loaded: {model} ({mb / 1024.0:0.#} GB)");
+        foreach (var (owner, mb) in g.Reservations)
+            ImGui.TextDisabled($"Reserved by {owner}: {mb / 1024.0:0.#} GB");
+        if (g.AutoChoice != null)
+        {
+            ImGui.TextColored(ImGuiColors.HealerGreen, $"Model \"auto\" picks {g.AutoChoice} right now.");
+            ImGui.TextDisabled(g.AutoReason ?? "");
+            ImGui.TextDisabled("It follows the free VRAM by itself: smaller while a game holds the card, larger when it is free.");
+        }
+
+        if (ImGui.SmallButton("Ask again"))
+        {
+            serverGpu = null;
+            readingServerGpu = null;
+        }
+
+        ImGui.Spacing();
+        if (g.BudgetMb is { } budget)
+            ImGui.TextColored(ImGuiColors.DalamudViolet, $"About {budget / 1024.0:0.#} GB of VRAM for a model there.");
+        return true;
+    }
+
+    private void DrawRecommendations()
+    {
+        var budget = Budget();
         if (loadingRecommendations is { IsCompleted: true } load)
         {
             recommendations = load.IsCompletedSuccessfully ? load.Result : Recommendations.Bundled();
@@ -312,6 +380,15 @@ public sealed class SetupWindow : Window, IDisposable
                 var id = CurrentServer()?.Kind == BackendKinds.LmStudio ? m.LmStudio : m.Ollama;
                 if (id != null && installed.Contains(id))
                     ImGui.TextColored(ImGuiColors.HealerGreen, "installed");
+                else if (m.Ollama != null && pullModel == m.Ollama && pulling is { IsCompleted: false })
+                    ImGui.ProgressBar((float)(pullProgress?.Fraction ?? 0), new Vector2(-1, 0), pullProgress?.Status ?? "starting");
+                else if (m.Ollama != null && CurrentServer()?.Kind == BackendKinds.Ollama)
+                {
+                    ImGui.BeginDisabled(pulling is { IsCompleted: false });
+                    if (ImGui.SmallButton($"Download##{m.Name}"))
+                        StartPull(m.Ollama);
+                    ImGui.EndDisabled();
+                }
                 else if (m.Ollama != null && ImGui.SmallButton($"Copy pull command##{m.Name}"))
                     ImGui.SetClipboardText($"ollama pull {m.Ollama}");
             }
@@ -319,11 +396,41 @@ public sealed class SetupWindow : Window, IDisposable
             ImGui.EndTable();
         }
 
-        ImGui.TextDisabled("Install a model with its pull command in a terminal (or search it in LM Studio), then press Next.");
+        if (pullMessage != null)
+            ImGui.TextWrapped(pullMessage);
+        ImGui.TextDisabled(CurrentServer()?.Kind == BackendKinds.Ollama
+            ? "Download installs a model into Ollama here; then press Next."
+            : "Install a model with its pull command in a terminal (or search it in LM Studio), then press Next.");
+    }
+
+    /// <summary>Downloads a model into the chosen Ollama; the model list is refreshed when it is in.</summary>
+    private void StartPull(string model)
+    {
+        if (CurrentServer() is not { } srv)
+            return;
+        pullModel = model;
+        pullProgress = null;
+        pullMessage = null;
+        var progress = new Progress<PullProgress>(p => pullProgress = p);
+        pulling = Task.Run(async () =>
+        {
+            try
+            {
+                await ModelPull.PullAsync(engine.Http, srv.RootUrl, model, progress, cts.Token).ConfigureAwait(false);
+                pullMessage = $"{model} is installed.";
+                Detect(); // the new model appears in the server's list
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or IOException or System.Text.Json.JsonException)
+            {
+                pullMessage = $"Could not download {model}: {ex.Message}";
+            }
+        });
     }
 
     private int Budget()
     {
+        if (useAlmanac && serverGpu?.BudgetMb is { } serverBudget)
+            return serverBudget;
         var s = plugin.Settings;
         var vram = adapters.Count == 0 ? manualVramGb * 1024 : adapters[Math.Clamp(adapterIndex, 0, adapters.Count - 1)].VramMb;
         return Recommendations.Budget(vram, s.GameOnSameGpu, s.GameReserveMb);
@@ -337,7 +444,7 @@ public sealed class SetupWindow : Window, IDisposable
     {
         var models = CurrentServer()?.Models.Select(m => m.Id).ToList() ?? [];
         if (useAlmanac)
-            models = [AlmanacDefaultModel, .. models];
+            models = serverGpu?.AutoChoice != null ? ["auto", AlmanacDefaultModel, .. models] : [AlmanacDefaultModel, .. models];
         if (models.Count == 0)
         {
             ImGui.TextColored(ImGuiColors.DalamudOrange, "The server lists no models. Install one (see the previous step), then press Refresh.");
@@ -511,7 +618,7 @@ public sealed class SetupWindow : Window, IDisposable
             case 2:
                 var models = CurrentServer()?.Models.Select(m => m.Id).ToList() ?? [];
                 if (useAlmanac)
-                    models = [AlmanacDefaultModel, .. models];
+                    models = serverGpu?.AutoChoice != null ? ["auto", AlmanacDefaultModel, .. models] : [AlmanacDefaultModel, .. models];
                 if (models.Count > 0)
                     s.Model = models[Math.Clamp(modelIndex, 0, models.Count - 1)];
                 break;

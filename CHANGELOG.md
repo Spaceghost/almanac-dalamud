@@ -17,15 +17,7 @@ Statuses mean exactly what they mean in the What's new view in game:
 
 Merged, not in a release yet.
 
-* In game, saving settings no longer freezes the game for over a second: every Next in the setup and every edit in the settings wrote each of the 24 settings in its own transaction, which under Wine took about 50 ms apiece. They are now written in one transaction, only those that changed, and the store no longer waits for a disk flush on every commit (a crash still cannot corrupt it).
-* In game, thinking models (qwen3.5, deepseek-r1, ...) answer instead of spending the whole reply budget thinking and returning nothing: reasoning is off unless you turn on "Let thinking models reason first" in the settings.
-* The plugin recognises Wine on builds that hide `wine_get_version` (the wine-xiv-staging XIVLauncher ships), by Wine's `\\?\unix\` path namespace and its registry key, so on Linux the setup offers what fits a Linux machine.
-* The gateway can serve model `auto`: per request, the largest of `[gateway] auto_models` that fits the VRAM free right now, measured where the gateway runs and reported at `/v1/almanac/gpu`. A game on the same card can reserve VRAM (`PUT /v1/almanac/gpu/reservations/<owner>`, with a TTL); almanac then unloads a model that no longer fits at once and serves a smaller one until the reservation ends. Run on the P4000 with FFXIV in a neighbouring container: qwen3.5:4b while playing, qwen3.5:9b otherwise.
-
-## [0.2.1] — Released 2026-09-23
-
-BETA entries are in this release but have not been verified in game yet; they become NEW or FIX once they have been seen working.
-
+* The in-game setup installs a recommended model into Ollama with one click (Download, with a progress bar) instead of a pull command to type in a terminal. With an almanac engine it shows that machine's GPU (free VRAM, what a game has reserved, the model "auto" picks right now) instead of the game PC's, and offers "auto" as the model.
 * The MCP server and the companion client are on MCP SDK 2.2 (from 1.30). Clients speaking the new 2026-07-28 protocol get the same approve/decline form for change and destructive tools, sent back with the result instead of as a request of its own; one approval runs one call, and a declined, cancelled, unanswered (10 minutes) or replayed approval runs nothing. Tested with the MCP SDK's own client only, not yet with Claude Code or Codex on 2.2.
 * `ai code` now starts Claude Code on your local model by default instead of Codex: over six red-to-green tasks on the P4000 both passed all six, Claude in 302 seconds against 518. `ai code --tool codex` (or `coder` under `[local]`) still picks Codex, and whichever tool is missing falls back to the other.
 
