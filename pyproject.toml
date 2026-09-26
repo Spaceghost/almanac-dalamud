@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "almanac"
-version = "0.2.1"
+version = "0.2.2"
 description = "Headless local AI tool runner: Markdown knowledge base, declared tools, MCP server, local model gateway, FFXIV/Dalamud integration."
 readme = "README.md"
 license = "MIT"
