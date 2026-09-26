@@ -18,6 +18,9 @@ public sealed record AgentOptions
 
     public int? MaxTokens { get; init; }
 
+    /// <summary>Passed through as <see cref="ChatRequest.ReasoningEffort"/>.</summary>
+    public string? ReasoningEffort { get; init; }
+
     /// <summary>Switch to <see cref="ToolCallingMode.Prompted"/> when the backend rejects native tools.</summary>
     public bool FallBackToPrompted { get; init; } = true;
 }
@@ -156,6 +159,7 @@ public sealed class AgentLoop(IChatBackend chat, IToolSource tools, AgentOptions
             Tools = Mode == ToolCallingMode.Native && offered.Count > 0 ? offered : null,
             Temperature = options.Temperature,
             MaxTokens = options.MaxTokens,
+            ReasoningEffort = options.ReasoningEffort,
         };
     }
 

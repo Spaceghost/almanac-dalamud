@@ -38,6 +38,12 @@ public sealed class AlmanacSettings
 
     public int MaxTokens { get; set; } = 1024;
 
+    /// <summary>
+    /// Let thinking models (qwen3.5, deepseek-r1, ...) reason before answering. Off by default: in the game an answer
+    /// is wanted quickly, and within MaxTokens a model can think for its whole budget and answer nothing.
+    /// </summary>
+    public bool Thinking { get; set; }
+
     public string SystemPrompt { get; set; } = "";
 
     public string AlmanacUrl { get; set; } = "http://127.0.0.1:41881/v1";
@@ -104,8 +110,10 @@ public sealed class AlmanacSettings
     public void Save(AlmanacStore store)
     {
         Normalize();
-        foreach (var p in Properties)
-            store.Set(Prefix + p.Name, Convert.ToString(p.GetValue(this), CultureInfo.InvariantCulture) ?? "");
+        // One transaction, unchanged keys skipped: this runs on the game's UI thread (every Next in the setup,
+        // every edit in the settings), and a commit per key cost over a second under Wine.
+        store.SetMany(Properties.Select(p =>
+            KeyValuePair.Create(Prefix + p.Name, Convert.ToString(p.GetValue(this), CultureInfo.InvariantCulture) ?? "")));
     }
 
     public void Normalize()

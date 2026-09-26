@@ -27,8 +27,9 @@ import json
 import logging
 import os
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import httpx
 
@@ -113,7 +114,9 @@ class Residency:
         state_dir: Path | None = None,
         processes: Callable[[list[str]], list[str]] = running_matches,
         clock: Callable[[], float] = time.time,
+        resolve: Callable[[], Awaitable[str]] | None = None,
     ) -> None:
+        """``resolve``: for model ``auto``, returns the model to pin right now (the gateway's autoselect)."""
         merged = {**DEFAULTS, **settings}
         self.wanted = [str(p) for p in merged["keep_loaded_while_process"]]
         self.idle_keep_alive = merged["idle_keep_alive"]
@@ -126,6 +129,7 @@ class Residency:
         self.state_file = state_dir / STATE_FILE if state_dir else None
         self._processes = processes
         self._clock = clock
+        self._resolve = resolve
         self.state = "disabled" if not self.wanted else "idle"
         self.reason = "" if self.wanted else "no processes configured"
         self.running: list[str] = []
@@ -192,8 +196,22 @@ class Residency:
         self._write()
         return self.snapshot()
 
+    async def _follow_auto(self) -> None:
+        """For ``auto``: switch to the model that fits now, releasing the one pinned before (if it was ours)."""
+        if self._resolve is None:
+            return
+        chosen = await self._resolve()
+        if chosen == self.model:
+            return
+        if self._pinned_by_us and await self._resident() is not None:
+            await self._keep_alive(self.idle_keep_alive)
+            log.info("residency: %s no longer fits best; released for %s", self.model, chosen)
+        self._pinned_by_us = False
+        self.model = chosen
+
     async def _hold(self) -> None:
         who = ", ".join(self.running)
+        await self._follow_auto()
         entry = await self._resident()
         if entry is not None and is_pinned(str(entry.get("expires_at", ""))):
             self._pinned_by_us = True
@@ -203,7 +221,7 @@ class Residency:
             self._set("idle", f"{who} running; preload is off, pinning once the model is loaded by a request")
             return
         if entry is None:
-            verdict = await asyncio.to_thread(self.guard.may_load, False)
+            verdict = await asyncio.to_thread(self.guard.may_load, False, self._resolve is not None)
             if not verdict.ok:
                 self._set("deferred", f"{who} running but {verdict.reason}; retrying every {self.poll:g}s", logging.WARNING)
                 return

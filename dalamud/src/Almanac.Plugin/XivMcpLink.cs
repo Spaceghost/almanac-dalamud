@@ -13,7 +13,7 @@ public static class XivMcpGates
     /// <summary>Func&lt;int&gt;: 2 or later has the gates below.</summary>
     public const string ApiRevision = "XivMcp.ApiRevision";
 
-    /// <summary>Func&lt;string, string&gt;: client name → {endpoint, token, clientName} or {error}. Issues a fresh per-client token.</summary>
+    /// <summary>Func&lt;string, string&gt;: client name → {endpoint, endpoints, token, clientName} or {error}. Issues a fresh per-client token.</summary>
     public const string ConnectClient = "XivMcp.ConnectClient";
 
     /// <summary>Func&lt;string&gt;: {configured, endpoint, model, hasApiKey}.</summary>
@@ -92,7 +92,7 @@ public sealed class XivMcpLink(IDalamudPluginInterface pi, IFramework framework,
             var n = JsonNode.Parse(json);
             if (n?["error"]?.GetValue<string>() is { } error)
                 return Fail(error == "disabled" ? "XivMcp does not let plugins connect themselves (XivMcp → Settings → Local model)." : $"XivMcp: {error}");
-            var endpoint = n?["endpoint"]?.GetValue<string>();
+            var endpoint = PreferLoopback(n?["endpoints"] as JsonArray) ?? n?["endpoint"]?.GetValue<string>();
             var token = n?["token"]?.GetValue<string>();
             if (endpoint == null || !Uri.TryCreate(endpoint, UriKind.Absolute, out var uri))
                 return Fail("XivMcp returned no endpoint.");
@@ -107,6 +107,15 @@ public sealed class XivMcpLink(IDalamudPluginInterface pi, IFramework framework,
     }
 
     public void Forget() => cached = null;
+
+    /// <summary>
+    /// XivMcp can bind loopback and a tailnet address at once and prefers the tailnet one for remote clients. Almanac
+    /// runs in the same game, so it takes the loopback endpoint whenever one is bound.
+    /// </summary>
+    internal static string? PreferLoopback(JsonArray? endpoints) =>
+        endpoints?.Select(e => e as JsonValue)
+            .Select(v => v != null && v.TryGetValue<string>(out var url) ? url : null)
+            .FirstOrDefault(url => url != null && Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.IsLoopback);
 
     public void SubscribeLocalModelChanged(Action handler)
     {

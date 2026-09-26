@@ -31,7 +31,10 @@ public sealed class AlmanacStore : IDisposable
         var builder = new SqliteConnectionStringBuilder { DataSource = path, Mode = path == ":memory:" ? SqliteOpenMode.Memory : SqliteOpenMode.ReadWriteCreate, Pooling = false };
         db = new SqliteConnection(builder.ToString());
         db.Open();
-        Exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=2000;");
+        // synchronous=NORMAL: with WAL a commit no longer waits for an fsync (only checkpoints do). The
+        // store is written from the game's UI thread, and under Wine each fsync costs tens of milliseconds;
+        // a crash can lose the last commits but never corrupts the database.
+        Exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=2000;");
         Migrate();
         LiveObjects.Acquired(LiveObjects.Kinds.Store);
     }
@@ -80,6 +83,32 @@ public sealed class AlmanacStore : IDisposable
                 "INSERT INTO kv(key, value, updated_at) VALUES($k, $v, $t) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
                 ("$k", key), ("$v", value), ("$t", Now()));
             cmd.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>Writes several keys in one transaction, skipping those whose value is unchanged. Returns how many were written.</summary>
+    public int SetMany(IEnumerable<KeyValuePair<string, string>> values)
+    {
+        lock (gate)
+        {
+            using var tx = db.BeginTransaction();
+            var written = 0;
+            foreach (var (key, value) in values)
+            {
+                using var read = Command("SELECT value FROM kv WHERE key = $k", ("$k", key));
+                read.Transaction = tx;
+                if (read.ExecuteScalar() as string == value)
+                    continue;
+                using var cmd = Command(
+                    "INSERT INTO kv(key, value, updated_at) VALUES($k, $v, $t) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                    ("$k", key), ("$v", value), ("$t", Now()));
+                cmd.Transaction = tx;
+                cmd.ExecuteNonQuery();
+                written++;
+            }
+
+            tx.Commit();
+            return written;
         }
     }
 

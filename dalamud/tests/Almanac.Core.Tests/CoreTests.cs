@@ -232,6 +232,77 @@ public sealed class StoreAndChatTests
     }
 
     [Fact]
+    public void SettingsSaveWritesOnlyChangedKeysInOneTransaction()
+    {
+        using var store = AlmanacStore.InMemory();
+        var s = AlmanacSettings.Load(store);
+        s.Save(store);
+        Assert.Equal(0, store.SetMany(store.GetPrefix("settings.")));  // saved values read back unchanged
+        s.Model = "auto";
+        Assert.Equal(1, store.SetMany([KeyValuePair.Create("settings.Model", "auto"), KeyValuePair.Create("settings.Temperature", store.Get("settings.Temperature")!)]));
+        Assert.Equal("auto", AlmanacSettings.Load(store).Model);
+    }
+
+    [Fact]
+    public void ReasoningEffortIsSentOnlyWhenSet()
+    {
+        ChatRequest Request(string? effort) => new() { Model = "auto", Messages = [ChatMessage.User("hi")], ReasoningEffort = effort };
+        Assert.Equal("none", ChatClient.BuildBody(Request("none"))["reasoning_effort"]!.GetValue<string>());
+        Assert.False(ChatClient.BuildBody(Request(null)).ContainsKey("reasoning_effort"));
+        Assert.False(new AlmanacSettings().Thinking);  // off unless asked for
+    }
+
+    [Fact]
+    public async Task ModelPullReportsProgressAndFailures()
+    {
+        var lines = string.Join("\n",
+            """{"status":"pulling manifest"}""",
+            """{"status":"pulling 2a654d98","digest":"sha256:2a65","total":1000,"completed":250}""",
+            """{"status":"pulling 2a654d98","digest":"sha256:2a65","total":1000,"completed":1000}""",
+            """{"status":"verifying sha256 digest"}""",
+            """{"status":"success"}""");
+        var handler = new FakeHandler((req, body) => FakeHandler.Json(lines));
+        var seen = new List<PullProgress>();
+        await ModelPull.PullAsync(new HttpClient(handler), "http://127.0.0.1:11434", "qwen3.5:4b", new SyncProgress<PullProgress>(seen.Add), CancellationToken.None);
+        Assert.Equal("http://127.0.0.1:11434/api/pull", handler.Requests[0].Url);
+        Assert.Contains("\"model\":\"qwen3.5:4b\"", handler.Requests[0].Body);
+        Assert.Equal(0.25, seen[1].Fraction);
+        Assert.Null(seen[0].Fraction);
+        Assert.Equal("success", seen[^1].Status);
+
+        var missing = new FakeHandler((req, body) => FakeHandler.Json("""{"error":"pull model manifest: file does not exist"}"""));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ModelPull.PullAsync(new HttpClient(missing), "http://x", "nope:1b", null, CancellationToken.None));
+        Assert.Contains("file does not exist", ex.Message);
+
+        var cut = new FakeHandler((req, body) => FakeHandler.Json("""{"status":"pulling manifest"}"""));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ModelPull.PullAsync(new HttpClient(cut), "http://x", "m", null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ServerGpuReadsTheEngineReport()
+    {
+        var report = """
+            {"gpus":[],"inference":{"name":"Quadro P4000","vendor":"nvidia","total_mb":8192,"used_mb":6691,"free_mb":1501},
+             "loaded":[{"model":"qwen3.5:4b","vram_mb":3541}],"installed":["qwen3.5:4b","qwen3.5:9b"],
+             "reservations":{"ffxiv":2993},"reclaimable_mb":3541,"headroom_mb":819,"budget_mb":4380,
+             "auto":{"models":["qwen3.5:9b","qwen3.5:4b"],"choice":"qwen3.5:4b","reason":"qwen3.5:4b needs about 3541 MB of 4380 MB available"}}
+            """;
+        var handler = new FakeHandler((req, body) =>
+            req.Headers.Authorization?.Parameter == "tok" ? FakeHandler.Json(report) : FakeHandler.Json("{}", System.Net.HttpStatusCode.Unauthorized));
+        var gpu = await ServerGpu.ReadAsync(new HttpClient(handler), "http://127.0.0.1:41881/v1", "tok", CancellationToken.None);
+        Assert.Equal("http://127.0.0.1:41881/v1/almanac/gpu", handler.Requests[0].Url);
+        Assert.NotNull(gpu);
+        Assert.Equal(("Quadro P4000", 8192, 1501, 4380), (gpu.Name, gpu.TotalMb, gpu.FreeMb, gpu.BudgetMb));
+        Assert.Equal(("qwen3.5:4b", 3541), gpu.Loaded[0]);
+        Assert.Equal(2993, gpu.Reservations["ffxiv"]);
+        Assert.Equal("qwen3.5:4b", gpu.AutoChoice);
+        Assert.Null(await ServerGpu.ReadAsync(new HttpClient(handler), "http://127.0.0.1:41881/v1", "wrong", CancellationToken.None));
+        Assert.Null(ServerGpu.Parse(System.Text.Json.Nodes.JsonNode.Parse("""{"gpus":[],"inference":null}""")));
+    }
+
+    [Fact]
     public void ThreadsMessagesAndForks()
     {
         using var store = AlmanacStore.InMemory();
@@ -295,4 +366,10 @@ public sealed class StoreAndChatTests
         Assert.True(window.Count <= ChatSession.HistoryWindow);
         Assert.Equal("user", window[0].Role);
     }
+}
+
+/// <summary>An IProgress that reports on the calling thread (Progress&lt;T&gt; posts to the thread pool).</summary>
+internal sealed class SyncProgress<T>(Action<T> report) : IProgress<T>
+{
+    public void Report(T value) => report(value);
 }

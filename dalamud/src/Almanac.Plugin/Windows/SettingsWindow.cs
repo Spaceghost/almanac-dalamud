@@ -113,6 +113,13 @@ public sealed class SettingsWindow : Window
             changed = true;
         }
 
+        var thinking = s.Thinking;
+        if (ImGui.Checkbox("Let thinking models reason first (slower)", ref thinking))
+        {
+            s.Thinking = thinking;
+            changed = true;
+        }
+
         ImGui.TextUnformatted("System prompt (empty = default)");
         var prompt = s.SystemPrompt;
         if (ImGui.InputTextMultiline("##system", ref prompt, 4000, new Vector2(-1, 90 * ImGuiHelpers.GlobalScale)))
