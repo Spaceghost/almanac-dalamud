@@ -35,7 +35,8 @@ import fnmatch
 import hmac
 import json
 import logging
-from typing import Any, AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 
 import httpx
 from starlette.applications import Starlette

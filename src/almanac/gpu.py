@@ -13,9 +13,10 @@ counters (AMD). Neither answers -> an empty list, which callers treat as unknown
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 MB = 1024 * 1024
 
