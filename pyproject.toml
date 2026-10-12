@@ -15,7 +15,7 @@ requires-python = ">=3.11"
 # through httpx2 (upstream.py builds its client with it); the rest of almanac
 # still uses httpx.
 dependencies = [
-  "mcp==2.2.0",
+  "mcp==2.3.0",
   "starlette==1.7.0",
   "uvicorn==0.54.0",
   "httpx==0.28.1",
