@@ -6,7 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- 10.0.12: 10.0.0 dragged in SQLitePCLRaw.lib.e_sqlite3 2.1.11 (GHSA-2m69-gcr7-jv3q, high). -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
   </ItemGroup>
   <ItemGroup>
     <!-- Shared with the Python engine byte for byte; the suite hash is over these bytes. -->
